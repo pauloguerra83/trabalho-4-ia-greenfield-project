@@ -3,7 +3,8 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-10-02T15:35:44-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-05T18:55:25-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-05T19:08:04-03:00"
+  docs/phases/phase-03-videos/library-refs.md: "2026-10-05T19:10:21-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-10-02T15:35:44-03:00"
   docs/decisions/technical-decisions-next-frontend-config-base.md: "2026-10-02T15:35:44-03:00"
   docs/decisions/technical-decisions-next-frontend-msw-foundation.md: "2026-10-02T15:35:44-03:00"
@@ -47,15 +48,16 @@ sources_mtime:
 
 | Ref | Source | Scope | Topic | Status | Decision | Libraries |
 |-----|--------|-------|-------|--------|----------|-----------|
-| phase-03-videos/TD-01 | phase | Backend | Tecnologia da Fila de Mensagens | decided | A (BullMQ sobre Redis) | — |
+| phase-03-videos/TD-01 | phase | Backend | Tecnologia da Fila de Mensagens | decided | A (BullMQ sobre Redis) | @nestjs/bullmq, bullmq |
 | phase-03-videos/TD-02 | phase | Repo-wide | Imagem Local do Servidor de Storage Compatível com S3 | decided | A (`pgsty/minio`, tag `RELEASE.*` fixada) | — |
-| phase-03-videos/TD-03 | phase | Backend | Biblioteca Cliente de S3 | decided | A (AWS SDK v3) | — |
+| phase-03-videos/TD-03 | phase | Backend | Biblioteca Cliente de S3 | decided | A (AWS SDK v3) | @aws-sdk/client-s3, @aws-sdk/s3-request-presigner |
 | phase-03-videos/TD-04 | phase | Backend | Layout de Buckets e Chaves de Objeto | decided | A (um bucket privado, prefixo) | — |
 | phase-03-videos/TD-05 | phase | Cross-layer | Estratégia de Upload para Arquivos de até 10GB | decided | A (multipart pré-assinado orquestrado pela API) | — |
 | phase-03-videos/TD-06 | phase | Backend | Gatilho de Conclusão do Upload para o Processamento | decided | A (conclusão orientada pela API) | — |
 | phase-03-videos/TD-07 | phase | Backend | Topologia de Execução do Worker de Vídeo | decided | A (mesmo código, entrypoint e container separados) | — |
 | phase-03-videos/TD-08 | phase | Backend | Extração de Metadados e Geração de Thumbnail | decided | A (FFmpeg do sistema sobre URL pré-assinada) | — |
 | phase-03-videos/TD-09 | phase | Cross-layer | Endpoint de Storage (Host Interno vs. Navegador) | decided | A (endpoints interno + público) | — |
+|     └─ Last revision: 2026-10-05 — Confirma o tráfego navegador ↔ storage (URLs pré-assinadas de upload por partes… | | | | | | |
 | phase-03-videos/TD-10 | phase | Cross-layer | Identificador de URL Única do Vídeo | decided | A (ID aleatório base64url de 11 caracteres, único) | — |
 | phase-03-videos/TD-11 | phase | Cross-layer | Entrega de Streaming e Download, e Quem Pode Acessá-los | decided | A (GETs pré-assinados, só o dono na Fase 03) | — |
 | phase-03-videos/TD-12 | phase | Backend | Ciclo de Status do Vídeo e Política de Falha | decided | A (enum `status` draft→processing→ready\|failed, retentativas limitadas, `failed` terminal) | — |
@@ -86,7 +88,7 @@ _Source files:_
 ### phase-03-videos/TD-01
 
 **Recommendation:** **Opção A (BullMQ sobre Redis)**. É o caminho documentado pelo NestJS, traz retentativa, backoff e deduplicação por id de job prontos (necessários no TD-12) e adiciona um único container de fila pequeno e dedicado, o que atende o requisito do Compose. As Opções B e D evitam o container, mas colocam a carga dos jobs no banco da aplicação, e a B é nova demais. A Opção C exige montar a retentativa à mão para um único tipo de job. Fixar a versão major do BullMQ no `plan-resolve`; preferir a 5.x, a menos que a 6.x seja verificada com o `@nestjs/bullmq` 12.
-**Libraries:** —
+**Libraries:** @nestjs/bullmq, bullmq
 
 ### phase-03-videos/TD-02
 
@@ -96,7 +98,7 @@ _Source files:_
 ### phase-03-videos/TD-03
 
 **Recommendation:** **Opção A (AWS SDK v3)**. O TD-05 precisa de URLs pré-assinadas por parte (`UploadPart`), e o SDK oficial pré-assina qualquer comando tanto no servidor local quanto no S3 real, o que mantém a promessa de "trocar MinIO por S3 em produção" restrita a configuração. Parâmetros do cliente a fixar no plano: `endpoint` (TD-09), `forcePathStyle: true` e `requestChecksumCalculation: 'WHEN_REQUIRED'` + `responseChecksumValidation: 'WHEN_REQUIRED'`. Sem isso, as URLs de parte pré-assinadas podem exigir checksums que o cliente do navegador não envia.
-**Libraries:** —
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ### phase-03-videos/TD-04
 
@@ -127,6 +129,9 @@ _Source files:_
 
 **Recommendation:** **Opção A (endpoints interno + público)**. É a única opção que mantém os bytes fora da API e obedece à regra de nome de serviço do Compose em todo o tráfego entre containers. O valor `localhost` aparece apenas no `S3_PUBLIC_ENDPOINT`, voltado ao navegador, e isso precisa estar documentado no CLAUDE.md para não ser confundido com uma violação da regra de rede do Docker.
 **Libraries:** —
+
+**Revisions:**
+- 2026-10-05 — Confirma o tráfego navegador ↔ storage (URLs pré-assinadas de upload por partes, stream e download) como exceção consciente ao BFF estrito de next-frontend-config-base/TD-03: o BFF estrito vale para a API NestJS; o storage é uma origem separada, com CORS restrito à origem do frontend (métodos PUT e GET, expondo o header ETag). Rationale: resolve o ICC-1 da validação da Fase 03.
 
 ### phase-03-videos/TD-10
 

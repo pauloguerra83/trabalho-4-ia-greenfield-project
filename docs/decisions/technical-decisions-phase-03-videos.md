@@ -58,6 +58,7 @@ _Restrições herdadas (não reabertas):_ configuração via `@nestjs/config` + 
 **Recommendation:** **Opção A (BullMQ sobre Redis)**. É o caminho documentado pelo NestJS, traz retentativa, backoff e deduplicação por id de job prontos (necessários no TD-12) e adiciona um único container de fila pequeno e dedicado, o que atende o requisito do Compose. As Opções B e D evitam o container, mas colocam a carga dos jobs no banco da aplicação, e a B é nova demais. A Opção C exige montar a retentativa à mão para um único tipo de job. Fixar a versão major do BullMQ no `plan-resolve`; preferir a 5.x, a menos que a 6.x seja verificada com o `@nestjs/bullmq` 12.
 
 **Decision:** Opção A (BullMQ sobre Redis)
+**Libraries:** @nestjs/bullmq, bullmq
 
 ---
 
@@ -115,6 +116,7 @@ _Restrições herdadas (não reabertas):_ configuração via `@nestjs/config` + 
 **Recommendation:** **Opção A (AWS SDK v3)**. O TD-05 precisa de URLs pré-assinadas por parte (`UploadPart`), e o SDK oficial pré-assina qualquer comando tanto no servidor local quanto no S3 real, o que mantém a promessa de "trocar MinIO por S3 em produção" restrita a configuração. Parâmetros do cliente a fixar no plano: `endpoint` (TD-09), `forcePathStyle: true` e `requestChecksumCalculation: 'WHEN_REQUIRED'` + `responseChecksumValidation: 'WHEN_REQUIRED'`. Sem isso, as URLs de parte pré-assinadas podem exigir checksums que o cliente do navegador não envia.
 
 **Decision:** Opção A (AWS SDK v3)
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ---
 
@@ -290,6 +292,9 @@ _Restrições herdadas (não reabertas):_ configuração via `@nestjs/config` + 
 **Recommendation:** **Opção A (endpoints interno + público)**. É a única opção que mantém os bytes fora da API e obedece à regra de nome de serviço do Compose em todo o tráfego entre containers. O valor `localhost` aparece apenas no `S3_PUBLIC_ENDPOINT`, voltado ao navegador, e isso precisa estar documentado no CLAUDE.md para não ser confundido com uma violação da regra de rede do Docker.
 
 **Decision:** Opção A (endpoints interno + público)
+
+**Revisions:**
+- 2026-10-05 — Confirma o tráfego navegador ↔ storage (URLs pré-assinadas de upload por partes, stream e download) como exceção consciente ao BFF estrito de next-frontend-config-base/TD-03: o BFF estrito vale para a API NestJS; o storage é uma origem separada, com CORS restrito à origem do frontend (métodos PUT e GET, expondo o header ETag). Rationale: resolve o ICC-1 da validação da Fase 03.
 
 ---
 

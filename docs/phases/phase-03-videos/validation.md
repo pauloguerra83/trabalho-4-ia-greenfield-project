@@ -2,10 +2,10 @@
 kind: phase
 name: phase-03-videos
 status: dirty
-issue_count: 5
+issue_count: 4
 sources_mtime:
-  docs/phases/phase-03-videos/context.md: "2026-10-05T18:31:46-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-05T18:16:55-03:00"
+  docs/phases/phase-03-videos/context.md: "2026-10-05T18:59:14-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-05T18:55:25-03:00"
 issues:
   - id: AMB-1
     status: open
@@ -17,8 +17,9 @@ issues:
     status: open
     summary: "Destino do registro draft quando o lifecycle aborta o multipart não definido"
   - id: MD-1
-    status: open
+    status: resolved
     summary: "Onde rodam os testes que dependem de FFmpeg (worker) não está decidido"
+    resolved_by: phase-03-videos/TD-13
   - id: ICC-1
     status: open
     summary: "Acesso direto navegador↔storage vs BFF estrito (next-frontend-config-base/TD-03)"
@@ -43,7 +44,7 @@ _None._
 
 ### Missing Decisions
 
-- **MD-1** — O TD-07 coloca o FFmpeg **apenas na imagem do worker** ("adiciona o FFmpeg à sua imagem (um target dedicado no Dockerfile)") e, ao mesmo tempo, mantém o worker "dentro do pipeline único de DoD do `nestjs-project` (testes + `tsc` + lint)". A seção Testing Requirements exige teste de integração com o serviço real para services com efeito colateral, e o TD-08 prevê "testar em integração com o FFmpeg real e um arquivo pequeno de fixture". Nenhum TD decide em qual container esses testes rodam: o container onde a suíte roda hoje não teria `ffprobe`/`ffmpeg`, e os testes do worker falhariam ou teriam de ser mockados (o que o enunciado proíbe quando a infra real está disponível). É uma escolha estratégica que envolve vários componentes (Dockerfile, `compose.yaml`, scripts de teste, DoD). Escolha explícita: rodar `/research` (ou resolver via `/plan-resolve`) para decidir entre (a) instalar o FFmpeg também na imagem de desenvolvimento/testes da API, com uma suíte única num só container; (b) rodar os testes do worker dentro do container do worker, com um script de teste separado incluído na DoD; (c) imagem única com FFmpeg para API e worker.
+_None._
 
 ### Dependency Gaps
 
@@ -63,4 +64,4 @@ _None._ _(UI Inventory adiado: check não aplicável.)_
 
 ## Resolved Issues
 
-_No issues resolved yet._
+- **MD-1** _(resolved_by phase-03-videos/TD-13)_ — Onde rodam os testes que dependem de FFmpeg (worker) não estava decidido. Resolvido com a pesquisa adicional registrada no próprio arquivo de decisões da Fase 03: TD-13 (FFmpeg na imagem de dev comum), TD-14 (worker no processo de teste com prefixo de fila exclusivo) e TD-15 (MinIO real com bucket exclusivo de testes).

@@ -3,7 +3,7 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-10-02T15:35:44-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-05T18:16:55-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-05T18:55:25-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-10-02T15:35:44-03:00"
   docs/decisions/technical-decisions-next-frontend-config-base.md: "2026-10-02T15:35:44-03:00"
   docs/decisions/technical-decisions-next-frontend-msw-foundation.md: "2026-10-02T15:35:44-03:00"
@@ -59,6 +59,9 @@ sources_mtime:
 | phase-03-videos/TD-10 | phase | Cross-layer | Identificador de URL Única do Vídeo | decided | A (ID aleatório base64url de 11 caracteres, único) | — |
 | phase-03-videos/TD-11 | phase | Cross-layer | Entrega de Streaming e Download, e Quem Pode Acessá-los | decided | A (GETs pré-assinados, só o dono na Fase 03) | — |
 | phase-03-videos/TD-12 | phase | Backend | Ciclo de Status do Vídeo e Política de Falha | decided | A (enum `status` draft→processing→ready\|failed, retentativas limitadas, `failed` terminal) | — |
+| phase-03-videos/TD-13 | phase | Repo-wide | Onde o FFmpeg fica disponível para a suíte de testes | decided | A (FFmpeg na imagem de desenvolvimento comum) | — |
+| phase-03-videos/TD-14 | phase | Backend | Como o worker é exercitado nos testes sem interferir no ambiente de dev | decided | A (worker no processo de teste, com prefixo de fila exclusivo) | — |
+| phase-03-videos/TD-15 | phase | Backend | Storage usado pelos testes que envolvem upload e worker | decided | A (MinIO real com bucket exclusivo de testes) | — |
 
 _Source files:_
 
@@ -68,12 +71,12 @@ _Source files:_
 
 | Capability (from project-plan.md) | Covered by |
 |-----------------------------------|------------|
-| Serviço de armazenamento de arquivos (vídeos e thumbnails) | phase-03-videos/TD-02, phase-03-videos/TD-03, phase-03-videos/TD-04 |
-| Serviço de processamento em segundo plano (filas) | phase-03-videos/TD-01, phase-03-videos/TD-07 |
-| Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance | phase-03-videos/TD-03, phase-03-videos/TD-05, phase-03-videos/TD-09 |
+| Serviço de armazenamento de arquivos (vídeos e thumbnails) | phase-03-videos/TD-02, phase-03-videos/TD-03, phase-03-videos/TD-04, phase-03-videos/TD-15 |
+| Serviço de processamento em segundo plano (filas) | phase-03-videos/TD-01, phase-03-videos/TD-07, phase-03-videos/TD-13, phase-03-videos/TD-14 |
+| Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance | phase-03-videos/TD-03, phase-03-videos/TD-05, phase-03-videos/TD-09, phase-03-videos/TD-15 |
 | Pré-cadastro automático do vídeo como rascunho ao iniciar o upload | phase-03-videos/TD-05, phase-03-videos/TD-12 |
-| Processamento automático do vídeo após upload (extração de duração e metadados) | phase-03-videos/TD-06, phase-03-videos/TD-08, phase-03-videos/TD-12 |
-| Geração automática de thumbnail a partir de um frame do vídeo | phase-03-videos/TD-08, phase-03-videos/TD-12 |
+| Processamento automático do vídeo após upload (extração de duração e metadados) | phase-03-videos/TD-06, phase-03-videos/TD-08, phase-03-videos/TD-12, phase-03-videos/TD-13, phase-03-videos/TD-14 |
+| Geração automática de thumbnail a partir de um frame do vídeo | phase-03-videos/TD-08, phase-03-videos/TD-12, phase-03-videos/TD-13, phase-03-videos/TD-15 |
 | URL única por vídeo, sem conflito com outros vídeos | phase-03-videos/TD-10 |
 | Reprodução via streaming (sem necessidade de download completo) | phase-03-videos/TD-03, phase-03-videos/TD-09, phase-03-videos/TD-11 |
 | Download do vídeo pelo usuário | phase-03-videos/TD-03, phase-03-videos/TD-09, phase-03-videos/TD-11 |
@@ -138,6 +141,21 @@ _Source files:_
 ### phase-03-videos/TD-12
 
 **Recommendation:** **Opção A (enum único `draft | processing | ready | failed`, com 3 tentativas e backoff exponencial, `failed` terminal + mensagem de erro)**. Bate com o ciclo exigido, mantém a Fase 03 livre de conceitos da Fase 04, e as retentativas limitadas evitam que o usuário tenha de reenviar 10GB por causa de um erro transitório. O plano da Fase 04 precisa adicionar a publicação como campo separado; registrar essa passagem nas notas de fora de escopo do plano da Fase 03. Sem endpoint de reprocessamento manual na Fase 03.
+**Libraries:** —
+
+### phase-03-videos/TD-13
+
+**Recommendation:** **Opção A (FFmpeg na imagem de desenvolvimento comum)**. Mantém intactas a convenção do CLAUDE.md e a Definition of Done (um container, os mesmos quatro comandos), e é o único jeito de rodar os testes reais de FFmpeg sem dividir a suíte. O custo é o tamanho da imagem de dev, aceitável num ambiente local; a imagem de produção sem FFmpeg para a API é uma otimização de deploy que pertence à Fase 07. Registrar no plano que o "target dedicado" citado no texto da Opção A do TD-07 vira, em dev, a mesma imagem para os dois serviços.
+**Libraries:** —
+
+### phase-03-videos/TD-14
+
+**Recommendation:** **Opção A (worker no processo de teste, com prefixo de fila exclusivo)**. É a única opção determinística que testa o processamento real e o contrato produtor ↔ consumidor de ponta a ponta sem depender do estado do container de dev. O prefixo por ambiente é o mecanismo nativo do BullMQ para isolar filas no mesmo Redis e custa uma variável de ambiente. A Opção B deixa o resultado dos testes à mercê do container e do banco compartilhado; a Opção C deixa sem verificação justamente a entrega principal da fase.
+**Libraries:** —
+
+### phase-03-videos/TD-15
+
+**Recommendation:** **Opção A (MinIO real com bucket exclusivo de testes)**. É a única opção que testa as capacidades de que a fase realmente depende (multipart pré-assinado, Range lido pelo FFmpeg, `HeadObject`) mantendo o layout de chaves do TD-04 e isolando os dados de dev. Atualizar a seção "Object Storage" do guia `testing-guide-nestjs-project` deve entrar como tarefa do plano, para que o guia não contradiga a decisão.
 **Libraries:** —
 
 ## Inherited Decisions Detail

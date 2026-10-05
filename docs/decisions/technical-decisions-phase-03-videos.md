@@ -412,8 +412,7 @@ _Restrições herdadas (não reabertas):_ configuração via `@nestjs/config` + 
 
 **Recommendation:** **Opção A (FFmpeg na imagem de desenvolvimento comum)**. Mantém intactas a convenção do CLAUDE.md e a Definition of Done (um container, os mesmos quatro comandos), e é o único jeito de rodar os testes reais de FFmpeg sem dividir a suíte. O custo é o tamanho da imagem de dev, aceitável num ambiente local; a imagem de produção sem FFmpeg para a API é uma otimização de deploy que pertence à Fase 07. Registrar no plano que o "target dedicado" citado no texto da Opção A do TD-07 vira, em dev, a mesma imagem para os dois serviços.
 
-**Decision:** _[pending]_
-
+**Decision:** Opção A (FFmpeg na imagem de desenvolvimento comum)
 ---
 
 ## TD-14: Como o worker é exercitado nos testes sem interferir no ambiente de dev
@@ -443,7 +442,7 @@ _Restrições herdadas (não reabertas):_ configuração via `@nestjs/config` + 
 
 **Recommendation:** **Opção A (worker no processo de teste, com prefixo de fila exclusivo)**. É a única opção determinística que testa o processamento real e o contrato produtor ↔ consumidor de ponta a ponta sem depender do estado do container de dev. O prefixo por ambiente é o mecanismo nativo do BullMQ para isolar filas no mesmo Redis e custa uma variável de ambiente. A Opção B deixa o resultado dos testes à mercê do container e do banco compartilhado; a Opção C deixa sem verificação justamente a entrega principal da fase.
 
-**Decision:** _[pending]_
+**Decision:** Opção A (worker no processo de teste, com prefixo de fila exclusivo)
 
 ---
 
@@ -474,8 +473,7 @@ _Restrições herdadas (não reabertas):_ configuração via `@nestjs/config` + 
 
 **Recommendation:** **Opção A (MinIO real com bucket exclusivo de testes)**. É a única opção que testa as capacidades de que a fase realmente depende (multipart pré-assinado, Range lido pelo FFmpeg, `HeadObject`) mantendo o layout de chaves do TD-04 e isolando os dados de dev. Atualizar a seção "Object Storage" do guia `testing-guide-nestjs-project` deve entrar como tarefa do plano, para que o guia não contradiga a decisão.
 
-**Decision:** _[pending]_
-
+**Decision:** Opção A (MinIO real com bucket exclusivo de testes)
 ---
 
 
@@ -495,6 +493,6 @@ _Restrições herdadas (não reabertas):_ configuração via `@nestjs/config` + 
 | TD-10 | Cross-layer | Identificador de URL Única do Vídeo | Base64url aleatório de 11 caracteres + índice único | A (ID aleatório base64url de 11 caracteres com restrição de unicidade) |
 | TD-11 | Cross-layer | Entrega de Streaming e Download, e Acesso | URLs GET pré-assinadas, só o dono, só `ready` | A (URLs GET pré-assinadas, acesso só do dono na Fase 03) |
 | TD-12 | Backend | Ciclo de Status do Vídeo e Política de Falha | `draft → processing → ready \| failed`, 3 tentativas | A (enum único `draft → processing → ready \| failed`, retentativas limitadas, `failed` terminal) |
-| TD-13 | Repo-wide | Onde o FFmpeg fica disponível para a suíte de testes | FFmpeg na imagem de dev comum (API + worker) | _[pending]_ |
-| TD-14 | Backend | Como o worker é exercitado nos testes sem interferir no dev | Worker no processo de teste + prefixo de fila exclusivo | _[pending]_ |
-| TD-15 | Backend | Storage usado pelos testes de upload e worker | MinIO real com bucket exclusivo de testes | _[pending]_ |
+| TD-13 | Repo-wide | Onde o FFmpeg fica disponível para a suíte de testes | FFmpeg na imagem de dev comum (API + worker) | _A (FFmpeg na imagem de desenvolvimento comum) |
+| TD-14 | Backend | Como o worker é exercitado nos testes sem interferir no dev | Worker no processo de teste + prefixo de fila exclusivo | A (worker no processo de teste, com prefixo de fila exclusivo) |
+| TD-15 | Backend | Storage usado pelos testes de upload e worker | MinIO real com bucket exclusivo de testes | A (MinIO real com bucket exclusivo de testes) |

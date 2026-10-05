@@ -385,6 +385,100 @@ _Restrições herdadas (não reabertas):_ configuração via `@nestjs/config` + 
 
 ---
 
+## TD-13: Onde o FFmpeg fica disponível para a suíte de testes
+
+**Scope:** Repo-wide
+
+**Capability:** Transversal — covers: "Serviço de processamento em segundo plano (filas)", "Processamento automático do vídeo após upload (extração de duração e metadados)", "Geração automática de thumbnail a partir de um frame do vídeo"
+
+**Context:** Origem: issue `MD-1` de `docs/phases/phase-03-videos/validation.md`. Pelo `nestjs-project/CLAUDE.md`, todos os comandos de teste (`npm test`, `npm run test:e2e`) rodam dentro do container `nestjs-api`, cuja imagem (`Dockerfile.dev`, `node:25.6.0-slim`) não tem FFmpeg. O TD-07 previu o FFmpeg só na imagem do worker, mas também manteve o worker no pipeline único de DoD. Sem FFmpeg onde o Jest roda, os testes reais de `ffprobe`/`ffmpeg` (TD-08) não executam. A escolha afeta `Dockerfile.dev`, `compose.yaml`, os scripts de teste e a Definition of Done. Complementa o TD-07 e o TD-08, sem reabri-los.
+
+**Options:**
+
+### Option A: FFmpeg na imagem de desenvolvimento comum, usada pela API e pelo worker
+- O `Dockerfile.dev` passa a instalar `ffmpeg` (pacote da distribuição). Os serviços `nestjs-api` e `video-worker` usam a mesma imagem de dev, em containers separados (TD-07 mantido). A suíte inteira continua rodando no `nestjs-api`.
+- **Pros:** um único comando de teste e a mesma DoD (`npm test`, `npm run test:e2e`, `tsc`, `lint` no mesmo container). Nenhuma mudança no fluxo documentado no CLAUDE.md. Um único Dockerfile para manter em dev.
+- **Cons:** a imagem de dev da API fica maior (o FFmpeg e suas bibliotecas somam centenas de MB) e carrega um binário que a API não usa em runtime. A separação de imagens de produção fica para quando houver deploy (Fase 07).
+
+### Option B: Dockerfile com dois targets e testes do worker rodando no container do worker
+- O `Dockerfile.dev` ganha os targets `api` (sem FFmpeg) e `worker` (com FFmpeg). Os testes que dependem de FFmpeg rodam com um script próprio (ex.: `npm run test:worker`) dentro do container `video-worker`; o resto da suíte segue no `nestjs-api`.
+- **Pros:** a imagem da API continua enxuta. A separação fica igual à de produção desde já.
+- **Cons:** a DoD passa a ter dois comandos em dois containers, e o "suíte completa verde" depende de lembrar dos dois. É preciso separar os testes por padrão de arquivo ou configuração do Jest. Aumenta o risco de um teste ficar fora das duas execuções.
+
+### Option C: Suíte inteira rodando no container do worker
+- Só a imagem do worker tem FFmpeg, e todos os comandos de teste passam a ser executados no `video-worker` (a imagem dele é um superconjunto da API).
+- **Pros:** um único comando de teste; a imagem da API fica sem FFmpeg.
+- **Cons:** muda a convenção documentada ("todo comando roda no `nestjs-api`"), confunde onde rodar `tsc`/`lint`/testes e acopla a suíte da API a um container cuja função é processar a fila (ele precisaria ser iniciado mesmo para testar só a API).
+
+**Recommendation:** **Opção A (FFmpeg na imagem de desenvolvimento comum)**. Mantém intactas a convenção do CLAUDE.md e a Definition of Done (um container, os mesmos quatro comandos), e é o único jeito de rodar os testes reais de FFmpeg sem dividir a suíte. O custo é o tamanho da imagem de dev, aceitável num ambiente local; a imagem de produção sem FFmpeg para a API é uma otimização de deploy que pertence à Fase 07. Registrar no plano que o "target dedicado" citado no texto da Opção A do TD-07 vira, em dev, a mesma imagem para os dois serviços.
+
+**Decision:** _[pending]_
+
+---
+
+## TD-14: Como o worker é exercitado nos testes sem interferir no ambiente de dev
+
+**Scope:** Backend
+
+**Capability:** Transversal — covers: "Serviço de processamento em segundo plano (filas)", "Processamento automático do vídeo após upload (extração de duração e metadados)"
+
+**Context:** Testes e desenvolvimento usam o mesmo Postgres (`streamtube`, ver `src/test/create-test-data-source.ts`) e vão usar o mesmo Redis. Se o container `video-worker` estiver rodando durante `npm test`, ele pode consumir os jobs criados pelos testes, processando-os contra dados que o teste apaga em seguida (`cleanAllTables`) e deixando os testes não determinísticos. Pela documentação consultada via context7, o BullMQ separa filas pelo `prefix` das chaves no Redis (padrão `"bull"`, que precisa ser igual em todos os componentes que acessam a fila), e o `@nestjs/bullmq` repassa esse `prefix` ao `Worker`. Depende do TD-13 (FFmpeg disponível onde o processor roda).
+
+**Options:**
+
+### Option A: Worker dentro do processo de teste, com prefixo de fila exclusivo para testes
+- Os testes de integração do processor e o teste do pipeline completo sobem o módulo do worker no próprio Jest (`Test.createTestingModule` com o processor, ou `createApplicationContext(WorkerModule)`). O prefixo da fila vem de uma variável de ambiente (ex.: `QUEUE_PREFIX`): um valor em dev e outro exclusivo nos testes, de modo que o container `video-worker` nunca enxerga os jobs de teste.
+- **Pros:** determinístico: o teste controla quando o worker sobe, processa e fecha. Funciona com o `video-worker` do Compose ligado ou desligado. Testa o processor real contra Redis, Postgres e storage reais.
+- **Cons:** uma variável de ambiente a mais no schema Joi, no `.env.example` e no `compose.yaml`. O teste do pipeline completo precisa esperar (polling com timeout) o status `ready` no banco.
+
+### Option B: Usar o container `video-worker` do Compose nos testes e2e
+- O e2e faz o upload pela API e espera o worker do Compose processar, consultando o banco até `ready`.
+- **Pros:** exercita exatamente o container que roda em dev. Nenhum código de bootstrap do worker nos testes.
+- **Cons:** o resultado depende de o container estar de pé e com o código atualizado. Corre contra o `cleanAllTables` dos testes no mesmo banco. Falhas no worker aparecem só como timeout no teste, sem stack trace. Não há como isolar os testes de um desenvolvedor usando a aplicação ao mesmo tempo.
+
+### Option C: Testes de integração do processor no processo de teste, sem teste de pipeline completo
+- Igual à Opção A para o processor (recebe um job e verifica banco e storage), mas o e2e da API para no enfileiramento (verifica o job na fila) e não existe teste que una upload → fila → worker → `ready`.
+- **Pros:** testes mais rápidos e simples, sem espera assíncrona.
+- **Cons:** a entrega "processamento automático do vídeo" nunca é verificada de ponta a ponta. Uma quebra no contrato entre o produtor (API) e o consumidor (worker), como o nome da fila, o formato do payload ou o prefixo, passa despercebida.
+
+**Recommendation:** **Opção A (worker no processo de teste, com prefixo de fila exclusivo)**. É a única opção determinística que testa o processamento real e o contrato produtor ↔ consumidor de ponta a ponta sem depender do estado do container de dev. O prefixo por ambiente é o mecanismo nativo do BullMQ para isolar filas no mesmo Redis e custa uma variável de ambiente. A Opção B deixa o resultado dos testes à mercê do container e do banco compartilhado; a Opção C deixa sem verificação justamente a entrega principal da fase.
+
+**Decision:** _[pending]_
+
+---
+
+## TD-15: Storage usado pelos testes que envolvem upload e worker
+
+**Scope:** Backend
+
+**Capability:** Transversal — covers: "Serviço de armazenamento de arquivos (vídeos e thumbnails)", "Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance", "Geração automática de thumbnail a partir de um frame do vídeo"
+
+**Context:** O guia `testing-guide-nestjs-project` (`references/external-systems.md`, seção "Object Storage — Local Filesystem", escrita antes das decisões da Fase 03) manda usar um adaptador de filesystem local nos testes. Mas o TD-03, o TD-05, o TD-08 e o TD-11 dependem de recursos que só existem na API S3: multipart com URLs pré-assinadas por parte, `HeadObject`, GET pré-assinado com Range (lido pelo FFmpeg via HTTP) e regras de lifecycle. O enunciado também pede para não mockar o que dá para testar com a infra do Compose. Depende do TD-14.
+
+**Options:**
+
+### Option A: MinIO real do Compose com um bucket exclusivo para testes
+- Os testes usam o serviço de storage do Compose (`pgsty/minio`, TD-02) com um bucket próprio (ex.: `streamtube-media-test`, definido por variável de ambiente), criado no setup se não existir e esvaziado entre suítes.
+- **Pros:** exercita de verdade multipart, presign, Range e `HeadObject`, exatamente como em dev e produção. Isolado dos arquivos de dev. Segue a orientação do enunciado.
+- **Cons:** os testes dependem do container de storage estar de pé (como já dependem do Postgres). É preciso limpar o bucket entre suítes. O guia de testes precisa ser atualizado para não contradizer a prática.
+
+### Option B: Adaptador de filesystem local (como diz o guia de testes)
+- Uma interface de storage com duas implementações, local e S3; os testes usam a local, num diretório temporário.
+- **Pros:** testes sem dependência do container de storage. Segue o texto atual do guia.
+- **Cons:** não existe URL pré-assinada nem Range de um filesystem local acessível ao FFmpeg do worker. Multipart e lifecycle não são exercitados. Os testes passariam com um código que falharia contra o S3 real. Exige manter um segundo adaptador só para testes.
+
+### Option C: MinIO real com o mesmo bucket de dev e prefixo `test/` nas chaves
+- Os testes usam o bucket de desenvolvimento, gravando sob um prefixo de chave próprio.
+- **Pros:** nenhum bucket extra para criar.
+- **Cons:** as chaves seguem o layout `videos/{videoId}/…` do TD-04; acrescentar um prefixo só para testes desvia do layout real. Limpar por prefixo no bucket de dev arrisca apagar arquivos de desenvolvimento por engano.
+
+**Recommendation:** **Opção A (MinIO real com bucket exclusivo de testes)**. É a única opção que testa as capacidades de que a fase realmente depende (multipart pré-assinado, Range lido pelo FFmpeg, `HeadObject`) mantendo o layout de chaves do TD-04 e isolando os dados de dev. Atualizar a seção "Object Storage" do guia `testing-guide-nestjs-project` deve entrar como tarefa do plano, para que o guia não contradiga a decisão.
+
+**Decision:** _[pending]_
+
+---
+
+
 ## Decisions Summary
 
 | ID | Scope | Decisão | Recomendação | Escolha |
@@ -401,3 +495,6 @@ _Restrições herdadas (não reabertas):_ configuração via `@nestjs/config` + 
 | TD-10 | Cross-layer | Identificador de URL Única do Vídeo | Base64url aleatório de 11 caracteres + índice único | A (ID aleatório base64url de 11 caracteres com restrição de unicidade) |
 | TD-11 | Cross-layer | Entrega de Streaming e Download, e Acesso | URLs GET pré-assinadas, só o dono, só `ready` | A (URLs GET pré-assinadas, acesso só do dono na Fase 03) |
 | TD-12 | Backend | Ciclo de Status do Vídeo e Política de Falha | `draft → processing → ready \| failed`, 3 tentativas | A (enum único `draft → processing → ready \| failed`, retentativas limitadas, `failed` terminal) |
+| TD-13 | Repo-wide | Onde o FFmpeg fica disponível para a suíte de testes | FFmpeg na imagem de dev comum (API + worker) | _[pending]_ |
+| TD-14 | Backend | Como o worker é exercitado nos testes sem interferir no dev | Worker no processo de teste + prefixo de fila exclusivo | _[pending]_ |
+| TD-15 | Backend | Storage usado pelos testes de upload e worker | MinIO real com bucket exclusivo de testes | _[pending]_ |

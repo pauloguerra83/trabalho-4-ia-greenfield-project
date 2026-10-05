@@ -179,7 +179,7 @@ Entregar o fluxo completo de vídeo: serviço de armazenamento compatível com S
 ### SI-03.5 — Endpoint POST /videos (início do upload)
 
 **Route:** POST /videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-start-upload.plan.md`
 **Authorization:** Authenticated
 
 **Description:** Pré-cadastra o vídeo como rascunho no início do upload e abre o multipart no storage. Devolve ao cliente o necessário para enviar as partes direto ao storage.
@@ -230,7 +230,7 @@ Entregar o fluxo completo de vídeo: serviço de armazenamento compatível com S
 ### SI-03.6 — Endpoints de URLs de partes, retomada e abort do upload
 
 **Route:** POST /videos/:id/upload/part-urls, GET /videos/:id/upload/parts, DELETE /videos/:id/upload
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-upload-parts.plan.md`
 **Authorization:** Owner
 
 **Description:** Entrega as URLs pré-assinadas de cada parte, permite retomar um upload interrompido listando as partes já recebidas e permite abortar o upload. Também trata o multipart expirado pelo lifecycle (AMB-3).
@@ -274,7 +274,7 @@ Entregar o fluxo completo de vídeo: serviço de armazenamento compatível com S
 ### SI-03.7 — Endpoint POST /videos/:id/upload/complete (conclusão e enfileiramento)
 
 **Route:** POST /videos/:id/upload/complete
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-upload-complete.plan.md`
 **Authorization:** Owner
 
 **Description:** Fecha o multipart, confere o objeto final e dispara o processamento: o vídeo passa a `processing` e o job `video.process` é enfileirado pela própria API.
@@ -404,7 +404,7 @@ Entregar o fluxo completo de vídeo: serviço de armazenamento compatível com S
 ### SI-03.10 — Endpoint GET /videos/:id (consulta do dono)
 
 **Route:** GET /videos/:id
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-get.plan.md`
 **Authorization:** Owner
 
 **Description:** Expõe ao dono o estado do vídeo: status, duração, metadados, slug e URL pré-assinada da thumbnail. O cliente usa esse endpoint em polling para acompanhar a passagem de `processing` para `ready` (AMB-2).
@@ -440,7 +440,7 @@ Entregar o fluxo completo de vídeo: serviço de armazenamento compatível com S
 ### SI-03.11 — Endpoints GET /videos/:id/stream e GET /videos/:id/download
 
 **Route:** GET /videos/:id/stream, GET /videos/:id/download
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-stream-download.plan.md`
 **Authorization:** Owner
 
 **Description:** Entrega ao dono URLs pré-assinadas para assistir por streaming e para baixar o vídeo. O storage atende Range e 206, e nenhum byte de vídeo passa pela API.

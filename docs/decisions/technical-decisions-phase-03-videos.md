@@ -381,7 +381,7 @@ _Restrições herdadas (não reabertas):_ configuração via `@nestjs/config` + 
 
 **Recommendation:** **Opção A (enum único `draft | processing | ready | failed`, com 3 tentativas e backoff exponencial, `failed` terminal + mensagem de erro)**. Bate com o ciclo exigido, mantém a Fase 03 livre de conceitos da Fase 04, e as retentativas limitadas evitam que o usuário tenha de reenviar 10GB por causa de um erro transitório. O plano da Fase 04 precisa adicionar a publicação como campo separado; registrar essa passagem nas notas de fora de escopo do plano da Fase 03. Sem endpoint de reprocessamento manual na Fase 03.
 
-**Decision:**  Option A: Enum único `status` `draft → processing → ready | failed`, retentativas limitadas, `failed` terminal
+**Decision:** Option A: Enum único `status` `draft → processing → ready | failed`, retentativas limitadas, `failed` terminal
 
 ---
 

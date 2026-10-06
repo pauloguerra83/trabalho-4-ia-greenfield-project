@@ -3,8 +3,8 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-10-02T15:35:44-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-05T19:08:04-03:00"
-  docs/phases/phase-03-videos/library-refs.md: "2026-10-05T19:10:21-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-06T10:42:01-03:00"
+  docs/phases/phase-03-videos/library-refs.md: "2026-10-06T10:42:01-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-10-02T15:35:44-03:00"
   docs/decisions/technical-decisions-next-frontend-config-base.md: "2026-10-02T15:35:44-03:00"
   docs/decisions/technical-decisions-next-frontend-msw-foundation.md: "2026-10-02T15:35:44-03:00"
@@ -12,7 +12,7 @@ sources_mtime:
   docs/phases/phase-01-configuracao-base/context.md: "2026-10-02T15:35:44-03:00"
   docs/phases/phase-02-auth/context.md: "2026-10-02T15:35:44-03:00"
   docs/phases/phase-02-auth-frontend/context.md: "2026-10-02T15:35:44-03:00"
-  .claude/skills/testing-guide-nestjs-project/SKILL.md: "2026-10-02T15:35:43-03:00"
+  .claude/skills/testing-guide-nestjs-project/SKILL.md: "2026-10-06T10:42:01-03:00"
 ---
 
 # phase-03-videos — Context
@@ -35,14 +35,14 @@ sources_mtime:
 
 **Out of scope:** _Não especificado no plano._
 **Deliverables:** upload de até 10GB funcional, processamento automático do vídeo, streaming funcionando, URLs únicas geradas.
-**Affected subprojects:** _Nenhum citado explicitamente na seção da Fase 03._
+**Affected subprojects:** _A seção da Fase 03 não cita nenhum subprojeto._
 **Deferred subprojects:** _Nenhum._
-**Sequencing notes:** > Depende de: Fase 01, Fase 02 — frase de abertura: "Upload de arquivos grandes sem travar o sistema, processamento automático do vídeo e geração de URL única."
+**Sequencing notes:** > Depende de: Fase 01, Fase 02
 
 **Neighbors (for boundary detection only):**
 
-- **Phase 02:** Cadastro, Login e Gerenciamento de Conta — "> Depende de: Fase 01"
-- **Phase 04:** Gerenciamento de Vídeos e Canal — "> Depende de: Fase 02, Fase 03"
+- **Phase 02:** Fluxo completo de criação de conta, confirmação por e-mail, login, logout e recuperação de senha.
+- **Phase 04:** Edição das informações do vídeo, fluxo de rascunho e publicação, painel de administração do canal e página pública.
 
 ## Decisions Index
 
@@ -55,14 +55,14 @@ sources_mtime:
 | phase-03-videos/TD-05 | phase | Cross-layer | Estratégia de Upload para Arquivos de até 10GB | decided | A (multipart pré-assinado orquestrado pela API) | — |
 | phase-03-videos/TD-06 | phase | Backend | Gatilho de Conclusão do Upload para o Processamento | decided | A (conclusão orientada pela API) | — |
 | phase-03-videos/TD-07 | phase | Backend | Topologia de Execução do Worker de Vídeo | decided | A (mesmo código, entrypoint e container separados) | — |
-| phase-03-videos/TD-08 | phase | Backend | Extração de Metadados e Geração de Thumbnail | decided | A (FFmpeg do sistema sobre URL pré-assinada) | — |
-| phase-03-videos/TD-09 | phase | Cross-layer | Endpoint de Storage (Host Interno vs. Navegador) | decided | A (endpoints interno + público) | — |
+| phase-03-videos/TD-08 | phase | Backend | Abordagem de Extração de Metadados e Geração de Thumbnail | decided | A (FFmpeg do sistema sobre URL pré-assinada) | — |
+| phase-03-videos/TD-09 | phase | Cross-layer | Configuração do Endpoint de Storage (Interno vs. Navegador) | decided | A (endpoints interno + público) | — |
 |     └─ Last revision: 2026-10-05 — Confirma o tráfego navegador ↔ storage (URLs pré-assinadas de upload por partes… | | | | | | |
 | phase-03-videos/TD-10 | phase | Cross-layer | Identificador de URL Única do Vídeo | decided | A (ID aleatório base64url de 11 caracteres, único) | — |
-| phase-03-videos/TD-11 | phase | Cross-layer | Entrega de Streaming e Download, e Quem Pode Acessá-los | decided | A (GETs pré-assinados, só o dono na Fase 03) | — |
-| phase-03-videos/TD-12 | phase | Backend | Ciclo de Status do Vídeo e Política de Falha | decided | A (enum `status` draft→processing→ready\|failed, retentativas limitadas, `failed` terminal) | — |
+| phase-03-videos/TD-11 | phase | Cross-layer | Entrega de Streaming e Download, e Quem Pode Acessá-los | decided | A (URLs GET pré-assinadas, só o dono na Fase 03) | — |
+| phase-03-videos/TD-12 | phase | Backend | Ciclo de Status do Vídeo e Política de Falha no Processament… | decided | A (enum `status` draft → processing → ready \| failed, retentativas limitadas, `failed` terminal) | — |
 | phase-03-videos/TD-13 | phase | Repo-wide | Onde o FFmpeg fica disponível para a suíte de testes | decided | A (FFmpeg na imagem de desenvolvimento comum) | — |
-| phase-03-videos/TD-14 | phase | Backend | Como o worker é exercitado nos testes sem interferir no ambiente de dev | decided | A (worker no processo de teste, com prefixo de fila exclusivo) | — |
+| phase-03-videos/TD-14 | phase | Backend | Como o worker é exercitado nos testes sem interferir no dev | decided | A (worker no processo de teste, prefixo de fila exclusivo) | — |
 | phase-03-videos/TD-15 | phase | Backend | Storage usado pelos testes que envolvem upload e worker | decided | A (MinIO real com bucket exclusivo de testes) | — |
 
 _Source files:_
@@ -87,47 +87,47 @@ _Source files:_
 
 ### phase-03-videos/TD-01
 
-**Recommendation:** **Opção A (BullMQ sobre Redis)**. É o caminho documentado pelo NestJS, traz retentativa, backoff e deduplicação por id de job prontos (necessários no TD-12) e adiciona um único container de fila pequeno e dedicado, o que atende o requisito do Compose. As Opções B e D evitam o container, mas colocam a carga dos jobs no banco da aplicação, e a B é nova demais. A Opção C exige montar a retentativa à mão para um único tipo de job. Fixar a versão major do BullMQ no `plan-resolve`; preferir a 5.x, a menos que a 6.x seja verificada com o `@nestjs/bullmq` 12.
+**Recommendation:** É o caminho documentado pelo NestJS, traz retentativa, backoff e deduplicação por id de job prontos (necessários no TD-12) e adiciona um único container de fila pequeno e dedicado, o que atende o requisito do Compose. As Opções B e D evitam o container, mas colocam a carga dos jobs no banco da aplicação, e a B é nova demais. A Opção C exige montar a retentativa à mão para um único tipo de job. Fixar a versão major do BullMQ no `plan-resolve`; preferir a 5.x, a menos que a 6.x seja verificada com o `@nestjs/bullmq` 12.
 **Libraries:** @nestjs/bullmq, bullmq
 
 ### phase-03-videos/TD-02
 
-**Recommendation:** **Opção A (`pgsty/minio`, com tag `RELEASE.*` fixada)**. É a única opção que mantém exatamente a configuração "MinIO local" do projeto (mesmas variáveis de ambiente, `mc`, console) e permite fixar a versão, deixando o Compose reproduzível. Como a aplicação só fala S3 através do TD-03, trocar para o RustFS depois é uma mudança em um único serviço do Compose.
+**Recommendation:** É a única opção que mantém exatamente a configuração "MinIO local" do projeto (mesmas variáveis de ambiente, `mc`, console) e permite fixar a versão, deixando o Compose reproduzível. Como a aplicação só fala S3 através do TD-03, trocar para o RustFS depois é uma mudança em um único serviço do Compose.
 **Libraries:** —
 
 ### phase-03-videos/TD-03
 
-**Recommendation:** **Opção A (AWS SDK v3)**. O TD-05 precisa de URLs pré-assinadas por parte (`UploadPart`), e o SDK oficial pré-assina qualquer comando tanto no servidor local quanto no S3 real, o que mantém a promessa de "trocar MinIO por S3 em produção" restrita a configuração. Parâmetros do cliente a fixar no plano: `endpoint` (TD-09), `forcePathStyle: true` e `requestChecksumCalculation: 'WHEN_REQUIRED'` + `responseChecksumValidation: 'WHEN_REQUIRED'`. Sem isso, as URLs de parte pré-assinadas podem exigir checksums que o cliente do navegador não envia.
+**Recommendation:** O TD-05 precisa de URLs pré-assinadas por parte (`UploadPart`), e o SDK oficial pré-assina qualquer comando tanto no servidor local quanto no S3 real, o que mantém a promessa de "trocar MinIO por S3 em produção" restrita a configuração. Parâmetros do cliente a fixar no plano: `endpoint` (TD-09), `forcePathStyle: true` e `requestChecksumCalculation: 'WHEN_REQUIRED'` + `responseChecksumValidation: 'WHEN_REQUIRED'`. Sem isso, as URLs de parte pré-assinadas podem exigir checksums que o cliente do navegador não envia.
 **Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
 
 ### phase-03-videos/TD-04
 
-**Recommendation:** **Opção A (um bucket privado, prefixo `videos/{videoId}/…`)**. A Fase 03 ainda não tem conceito de visibilidade pública (ele chega na Fase 04), então um único bucket privado com leituras pré-assinadas é o layout mais simples que não vaza rascunhos. Regras de lifecycle por prefixo ainda permitem políticas diferentes por artefato, se necessário. As chaves usam o `videoId` (PK UUID), nunca o slug público (TD-10), então o slug não interfere no storage.
+**Recommendation:** A Fase 03 ainda não tem conceito de visibilidade pública (ele chega na Fase 04), então um único bucket privado com leituras pré-assinadas é o layout mais simples que não vaza rascunhos. Regras de lifecycle por prefixo ainda permitem políticas diferentes por artefato, se necessário. As chaves usam o `videoId` (PK UUID), nunca o slug público (TD-10), então o slug não interfere no storage.
 **Libraries:** —
 
 ### phase-03-videos/TD-05
 
-**Recommendation:** **Opção A (multipart pré-assinado orquestrado pela API)**. É a única opção que mantém os bytes fora da API, atende os 10GB dentro dos limites do S3 e oferece retomada por parte, como o plano do projeto exige. Parâmetros a fixar no plano: tamanho máximo de `10 GiB`, validado no início pelo tamanho declarado e conferido de novo via `HeadObject` na conclusão; partes de `64 MiB`; tipos de conteúdo `video/*`; regra de lifecycle abortando uploads incompletos após 1 dia; URLs de parte pré-assinadas com validade curta (por exemplo, 1h).
+**Recommendation:** É a única opção que mantém os bytes fora da API, atende os 10GB dentro dos limites do S3 e oferece retomada por parte, como o plano do projeto exige. Parâmetros a fixar no plano: tamanho máximo de `10 GiB`, validado no início pelo tamanho declarado e conferido de novo via `HeadObject` na conclusão; partes de `64 MiB`; tipos de conteúdo `video/*`; regra de lifecycle abortando uploads incompletos após 1 dia; URLs de parte pré-assinadas com validade curta (por exemplo, 1h).
 **Libraries:** —
 
 ### phase-03-videos/TD-06
 
-**Recommendation:** **Opção A (conclusão orientada pela API)**. Com o multipart orquestrado pelo cliente (TD-05), a API precisa chamar `CompleteMultipartUpload` de qualquer forma, então enfileirar ali não custa nada, é portável e fica transacional com a mudança de status. A Opção B só adiciona infraestrutura que se comporta de forma diferente em cada ambiente.
+**Recommendation:** Com o multipart orquestrado pelo cliente (TD-05), a API precisa chamar `CompleteMultipartUpload` de qualquer forma, então enfileirar ali não custa nada, é portável e fica transacional com a mudança de status. A Opção B só adiciona infraestrutura que se comporta de forma diferente em cada ambiente.
 **Libraries:** —
 
 ### phase-03-videos/TD-07
 
-**Recommendation:** **Opção A (mesmo código, entrypoint e container separados)**. Atende a arquitetura de container separado reaproveitando todos os blocos já existentes, e o worker fica dentro do pipeline único de DoD do `nestjs-project` (testes + `tsc` + lint). O FFmpeg roda como processo filho (TD-08), então o event loop do Node não é bloqueado e os sandboxed processors são desnecessários.
+**Recommendation:** Atende a arquitetura de container separado reaproveitando todos os blocos já existentes, e o worker fica dentro do pipeline único de DoD do `nestjs-project` (testes + `tsc` + lint). O FFmpeg roda como processo filho (TD-08), então o event loop do Node não é bloqueado e os sandboxed processors são desnecessários.
 **Libraries:** —
 
 ### phase-03-videos/TD-08
 
-**Recommendation:** **Opção A (FFmpeg do sistema executado diretamente sobre uma URL pré-assinada)**. Segue a orientação do próprio upstream após a descontinuação do `fluent-ffmpeg`, mantém os binários fora do `node_modules` compartilhado e deixa o FFmpeg ler o original por Range via HTTP, de modo que um arquivo de 10GB nunca é copiado para o worker. Saída: thumbnail em `videos/{id}/thumbnail.jpg` (JPEG, 1280px de largura, proporção preservada). Os metadados mantêm `duration_seconds` como coluna tipada, mais um JSON curado (resumos de `format`, stream de `video` e stream de `audio`).
+**Recommendation:** Segue a orientação do próprio upstream após a descontinuação do `fluent-ffmpeg`, mantém os binários fora do `node_modules` compartilhado e deixa o FFmpeg ler o original por Range via HTTP, de modo que um arquivo de 10GB nunca é copiado para o worker. Saída: thumbnail em `videos/{id}/thumbnail.jpg` (JPEG, 1280px de largura, proporção preservada). Os metadados mantêm `duration_seconds` como coluna tipada, mais um JSON curado (resumos de `format`, stream de `video` e stream de `audio`).
 **Libraries:** —
 
 ### phase-03-videos/TD-09
 
-**Recommendation:** **Opção A (endpoints interno + público)**. É a única opção que mantém os bytes fora da API e obedece à regra de nome de serviço do Compose em todo o tráfego entre containers. O valor `localhost` aparece apenas no `S3_PUBLIC_ENDPOINT`, voltado ao navegador, e isso precisa estar documentado no CLAUDE.md para não ser confundido com uma violação da regra de rede do Docker.
+**Recommendation:** É a única opção que mantém os bytes fora da API e obedece à regra de nome de serviço do Compose em todo o tráfego entre containers. O valor `localhost` aparece apenas no `S3_PUBLIC_ENDPOINT`, voltado ao navegador, e isso precisa estar documentado no CLAUDE.md para não ser confundido com uma violação da regra de rede do Docker.
 **Libraries:** —
 
 **Revisions:**
@@ -135,32 +135,32 @@ _Source files:_
 
 ### phase-03-videos/TD-10
 
-**Recommendation:** **Opção A (ID aleatório base64url de 11 caracteres com restrição de unicidade)**. Atende o "curto e sem conflito" sem dependência e, ao contrário do Sqids, não é enumerável, o que importa para a visibilidade unlisted (acesso só por link) das Fases 04 e 05. Coluna `slug varchar(11) UNIQUE`, gerada no pré-cadastro e imutável.
+**Recommendation:** Atende o "curto e sem conflito" sem dependência e, ao contrário do Sqids, não é enumerável, o que importa para a visibilidade unlisted (acesso só por link) das Fases 04 e 05. Coluna `slug varchar(11) UNIQUE`, gerada no pré-cadastro e imutável.
 **Libraries:** —
 
 ### phase-03-videos/TD-11
 
-**Recommendation:** **Opção A (URLs GET pré-assinadas, acesso só do dono na Fase 03)**. O suporte nativo a Range do S3 entrega streaming sem tocar na API, e URLs pré-assinadas são o único mecanismo que funciona com `<video src>` sem cookies. Acesso: na Fase 03, só o dono autenticado pode obter URLs de stream e de download, e só com status `ready`. A Fase 05 adiciona acesso anônimo para vídeos publicados como regra aditiva, então nunca será preciso adaptar uma restrição depois. A validade das URLs é parâmetro do plano (ex.: 1h para stream, 15 min para download).
+**Recommendation:** O suporte nativo a Range do S3 entrega streaming sem tocar na API, e URLs pré-assinadas são o único mecanismo que funciona com `<video src>` sem cookies. Acesso: na Fase 03, só o dono autenticado pode obter URLs de stream e de download, e só com status `ready`. A Fase 05 adiciona acesso anônimo para vídeos publicados como regra aditiva, então nunca será preciso adaptar uma restrição depois. A validade das URLs é parâmetro do plano (ex.: 1h para stream, 15 min para download).
 **Libraries:** —
 
 ### phase-03-videos/TD-12
 
-**Recommendation:** **Opção A (enum único `draft | processing | ready | failed`, com 3 tentativas e backoff exponencial, `failed` terminal + mensagem de erro)**. Bate com o ciclo exigido, mantém a Fase 03 livre de conceitos da Fase 04, e as retentativas limitadas evitam que o usuário tenha de reenviar 10GB por causa de um erro transitório. O plano da Fase 04 precisa adicionar a publicação como campo separado; registrar essa passagem nas notas de fora de escopo do plano da Fase 03. Sem endpoint de reprocessamento manual na Fase 03.
+**Recommendation:** Bate com o ciclo exigido, mantém a Fase 03 livre de conceitos da Fase 04, e as retentativas limitadas evitam que o usuário tenha de reenviar 10GB por causa de um erro transitório. O plano da Fase 04 precisa adicionar a publicação como campo separado; registrar essa passagem nas notas de fora de escopo do plano da Fase 03. Sem endpoint de reprocessamento manual na Fase 03.
 **Libraries:** —
 
 ### phase-03-videos/TD-13
 
-**Recommendation:** **Opção A (FFmpeg na imagem de desenvolvimento comum)**. Mantém intactas a convenção do CLAUDE.md e a Definition of Done (um container, os mesmos quatro comandos), e é o único jeito de rodar os testes reais de FFmpeg sem dividir a suíte. O custo é o tamanho da imagem de dev, aceitável num ambiente local; a imagem de produção sem FFmpeg para a API é uma otimização de deploy que pertence à Fase 07. Registrar no plano que o "target dedicado" citado no texto da Opção A do TD-07 vira, em dev, a mesma imagem para os dois serviços.
+**Recommendation:** Mantém intactas a convenção do CLAUDE.md e a Definition of Done (um container, os mesmos quatro comandos), e é o único jeito de rodar os testes reais de FFmpeg sem dividir a suíte. O custo é o tamanho da imagem de dev, aceitável num ambiente local; a imagem de produção sem FFmpeg para a API é uma otimização de deploy que pertence à Fase 07. Registrar no plano que o "target dedicado" citado no texto da Opção A do TD-07 vira, em dev, a mesma imagem para os dois serviços.
 **Libraries:** —
 
 ### phase-03-videos/TD-14
 
-**Recommendation:** **Opção A (worker no processo de teste, com prefixo de fila exclusivo)**. É a única opção determinística que testa o processamento real e o contrato produtor ↔ consumidor de ponta a ponta sem depender do estado do container de dev. O prefixo por ambiente é o mecanismo nativo do BullMQ para isolar filas no mesmo Redis e custa uma variável de ambiente. A Opção B deixa o resultado dos testes à mercê do container e do banco compartilhado; a Opção C deixa sem verificação justamente a entrega principal da fase.
+**Recommendation:** É a única opção determinística que testa o processamento real e o contrato produtor ↔ consumidor de ponta a ponta sem depender do estado do container de dev. O prefixo por ambiente é o mecanismo nativo do BullMQ para isolar filas no mesmo Redis e custa uma variável de ambiente. A Opção B deixa o resultado dos testes à mercê do container e do banco compartilhado; a Opção C deixa sem verificação justamente a entrega principal da fase.
 **Libraries:** —
 
 ### phase-03-videos/TD-15
 
-**Recommendation:** **Opção A (MinIO real com bucket exclusivo de testes)**. É a única opção que testa as capacidades de que a fase realmente depende (multipart pré-assinado, Range lido pelo FFmpeg, `HeadObject`) mantendo o layout de chaves do TD-04 e isolando os dados de dev. Atualizar a seção "Object Storage" do guia `testing-guide-nestjs-project` deve entrar como tarefa do plano, para que o guia não contradiga a decisão.
+**Recommendation:** É a única opção que testa as capacidades de que a fase realmente depende (multipart pré-assinado, Range lido pelo FFmpeg, `HeadObject`) mantendo o layout de chaves do TD-04 e isolando os dados de dev. Atualizar a seção "Object Storage" do guia `testing-guide-nestjs-project` deve entrar como tarefa do plano, para que o guia não contradiga a decisão.
 **Libraries:** —
 
 ## Inherited Decisions Detail
@@ -408,7 +408,7 @@ _None._
 | Service com ramificações + banco | Unitário: lógica das ramificações (repositório mockado) + Integração: contrato com o banco |
 | Service só com banco (sem ramificações) | Integração: contrato com o banco |
 | Service com lib configurada (JWT, cache) | Unitário: lib real com configuração de teste |
-| Service com dependência de efeito colateral (e-mail, storage) | Integração: serviço real de captura (Mailpit) ou adaptador local |
+| Service com dependência de efeito colateral (e-mail, storage) | Integração: serviço real no Docker (Mailpit para e-mail, bucket de testes do MinIO para storage) |
 | Módulo com imports configurados | Unitário: teste de compilação |
 | Controller | Apenas E2E (não escrever testes unitários) |
 | DTO | E2E: um teste de ligação da validação por endpoint |

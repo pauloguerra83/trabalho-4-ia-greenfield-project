@@ -12,14 +12,14 @@ This is a monorepo with two main areas:
 
 - `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc. The videos module (ownership by channel, the 8 endpoints, upload and processing flow) is described in the "Videos" section of `nestjs-project/CLAUDE.md`.
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `next-frontend/` — Frontend (Next.js 16) with Phases 01–02 (base config and auth); see `next-frontend/CLAUDE.md`. The video UI is out of scope for Phase 03.
 
 ## Architecture (C4 Container Diagram)
 
 See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
-- **Frontend** (Next.js) → calls API via REST, streams from Object Storage
-- **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
+- **Frontend** (Next.js) → calls API via REST; uploads video parts to and streams from Object Storage through presigned URLs
+- **API** (Nest.js) → business rules, auth, reads/writes DB, presigns direct-to-storage multipart uploads (no video bytes go through it), publishes jobs to queue, sends emails
 - **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
 - **Object Storage** (S3-compatible; `pgsty/minio` in development) → video files and thumbnails, one private bucket with keys `videos/{videoId}/source` and `videos/{videoId}/thumbnail.jpg`

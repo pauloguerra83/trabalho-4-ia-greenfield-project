@@ -16,7 +16,7 @@ target_file: test/videos-start-upload.e2e-spec.ts
 
 ### 1. Pré-cadastrar o vídeo e abrir o upload
 
-**Setup:** `Test.createTestingModule({ imports: [AppModule] })` com a configuração global do `main.ts` (`ValidationPipe` com `whitelist`/`forbidNonWhitelisted`/`transform`, `DomainExceptionFilter`, `ValidationExceptionFilter`); `beforeEach` com `cleanAllTables`, `emptyBucket()` do bucket de testes e limpeza do storage do throttler; usuário confirmado criado e autenticado via `POST /auth/login` (mesmo padrão de `test/auth.e2e-spec.ts`); `QUEUE_PREFIX` e `S3_BUCKET` de teste vindos de `src/test/setup-test-env.ts`.
+**Setup:** `Test.createTestingModule({ imports: [AppModule] })` com a configuração global do `main.ts` (`ValidationPipe` com `whitelist`/`forbidNonWhitelisted`/`transform`, `DomainExceptionFilter`, `ValidationExceptionFilter`); `beforeEach` com `cleanAllTables`, `emptyBucket()` do bucket de testes e limpeza do storage do throttler; usuário confirmado criado com o seu canal (como no registro) e autenticado via `POST /auth/login` (mesmo padrão de `test/auth.e2e-spec.ts`); `QUEUE_PREFIX` e `S3_BUCKET` de teste vindos de `src/test/setup-test-env.ts`.
 
 #### 1.1. iniciar-upload-cria-rascunho-e-multipart
 
@@ -29,7 +29,7 @@ target_file: test/videos-start-upload.e2e-spec.ts
     - expect: status 201
     - expect: body com `videoId` (uuid), `uploadId` (string não vazia), `slug` com 11 caracteres de `[A-Za-z0-9_-]`, `title: "Minha aula"`, `status: "draft"`, `partSize: 67108864` e `partCount: 3`
   2. Consultar a tabela `videos` pelo `videoId` devolvido
-    - expect: a linha existe com `status = 'draft'`, `user_id` igual ao `sub` do token, `upload_id` igual ao `uploadId` devolvido e `size_bytes = 150000000`
+    - expect: a linha existe com `status = 'draft'`, `channel_id` igual ao canal do usuário do token, `source_key = 'videos/{videoId}/source'`, `upload_id` igual ao `uploadId` devolvido e `size_bytes = 150000000` (emenda SI-03.14)
   3. Chamar `ListParts` no storage para a chave `videos/{videoId}/source` com o `uploadId`
     - expect: o multipart existe (sem erro `NoSuchUpload`) e ainda não tem partes
 
@@ -96,3 +96,17 @@ target_file: test/videos-start-upload.e2e-spec.ts
   1. POST /videos sem header `Authorization`, com body válido
     - expect: status 401
     - expect: nenhuma linha criada em `videos`
+
+#### 2.4. usuario-sem-canal-retorna-404
+
+**Covers AC:** SI-03.14 #3
+**Source:** manual (emenda SI-03.14)
+**Last sync:** 2026-10-06T00:00:00Z
+
+**Steps:**
+  1. Criar um usuário confirmado **sem** canal e autenticá-lo via `POST /auth/login`
+  2. POST /videos com o JWT desse usuário e body `{ "fileName": "aula.mp4", "fileSize": 1000, "contentType": "video/mp4" }`
+    - expect: status 404
+    - expect: body `{ statusCode: 404, error: "CHANNEL_NOT_FOUND", message: "Channel not found" }`
+  3. Contar as linhas em `videos`
+    - expect: nenhuma linha foi criada

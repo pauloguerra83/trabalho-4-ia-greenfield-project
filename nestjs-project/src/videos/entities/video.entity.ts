@@ -8,7 +8,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import { User } from '../../users/entities/user.entity';
+import { Channel } from '../../channels/entities/channel.entity';
 import type { VideoMetadata } from '../video-metadata';
 import { VideoStatus } from '../video-status.enum';
 
@@ -27,7 +27,7 @@ export class Video {
 
   @Index()
   @Column({ type: 'uuid' })
-  user_id: string;
+  channel_id: string;
 
   @Column({ type: 'varchar', length: 11, unique: true })
   slug: string;
@@ -46,6 +46,10 @@ export class Video {
 
   @Column({ type: 'enum', enum: VideoStatus, default: VideoStatus.DRAFT })
   status: VideoStatus;
+
+  /** Storage key of the original file (`videos/{id}/source`). */
+  @Column({ type: 'varchar' })
+  source_key: string;
 
   @Column({ type: 'varchar', nullable: true })
   upload_id: string | null;
@@ -68,9 +72,11 @@ export class Video {
   @UpdateDateColumn()
   updated_at: Date;
 
-  // No inverse side on User, same as RefreshToken and VerificationToken: adding
-  // it would force every DataSource that loads User to also load Video.
-  @ManyToOne(() => User)
-  @JoinColumn({ name: 'user_id' })
-  user: User;
+  // The owner is the channel; the owning user is reached through
+  // channel.user_id. No inverse side on Channel, same as RefreshToken and
+  // VerificationToken on User: adding it would force every DataSource that
+  // loads Channel to also load Video.
+  @ManyToOne(() => Channel)
+  @JoinColumn({ name: 'channel_id' })
+  channel: Channel;
 }

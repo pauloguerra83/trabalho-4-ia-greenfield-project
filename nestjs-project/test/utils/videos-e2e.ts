@@ -10,6 +10,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module';
+import { ChannelsService } from '../../src/channels/channels.service';
 import { DomainExceptionFilter } from '../../src/common/filters/domain-exception.filter';
 import { ValidationExceptionFilter } from '../../src/common/filters/validation-exception.filter';
 import storageConfig from '../../src/config/storage.config';
@@ -31,7 +32,15 @@ export interface VideosTestContext {
 
 export interface AuthenticatedUser {
   id: string;
+  /** `null` only when created with `withChannel: false`. */
+  channelId: string | null;
   accessToken: string;
+}
+
+export interface CreateAuthenticatedUserOptions {
+  password?: string;
+  /** Registration always creates the channel; `false` simulates its absence. */
+  withChannel?: boolean;
 }
 
 /** Boots AppModule with the same global pipes and filters as `main.ts`. */
@@ -74,17 +83,24 @@ export async function resetVideosTestState(
   ctx.throttlerStorage.storage.clear();
 }
 
-/** Creates a confirmed user and authenticates through `POST /auth/login`. */
+/**
+ * Creates a confirmed user with their channel, as registration does, and
+ * authenticates through `POST /auth/login`.
+ */
 export async function createAuthenticatedUser(
   ctx: VideosTestContext,
   email: string,
-  password = 'password123',
+  options: CreateAuthenticatedUserOptions = {},
 ): Promise<AuthenticatedUser> {
+  const { password = 'password123', withChannel = true } = options;
   const user = await ctx.dataSource.getRepository(User).save({
     email,
     password: await argon2.hash(password),
     is_confirmed: true,
   });
+  const channel = withChannel
+    ? await ctx.app.get(ChannelsService).createChannel(user.id, email)
+    : null;
 
   const response = await request(ctx.app.getHttpServer())
     .post('/auth/login')
@@ -92,5 +108,9 @@ export async function createAuthenticatedUser(
     .expect(200);
   const body = response.body as { access_token: string };
 
-  return { id: user.id, accessToken: body.access_token };
+  return {
+    id: user.id,
+    channelId: channel?.id ?? null,
+    accessToken: body.access_token,
+  };
 }

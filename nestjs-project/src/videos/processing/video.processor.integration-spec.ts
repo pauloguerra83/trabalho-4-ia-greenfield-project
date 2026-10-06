@@ -62,7 +62,7 @@ describe('VideoProcessor (integration)', () => {
   let queue: Queue;
   let s3: S3Client;
   let config: ConfigType<typeof storageConfig>;
-  let owner: User;
+  let channel: Channel;
 
   beforeAll(async () => {
     module = await Test.createTestingModule({
@@ -100,9 +100,12 @@ describe('VideoProcessor (integration)', () => {
     await queue.obliterate({ force: true });
     await cleanAllTables(dataSource);
     await emptyBucket(s3, config.bucket);
-    owner = await dataSource
+    const owner = await dataSource
       .getRepository(User)
       .save({ email: 'owner@example.com', password: 'hash' });
+    channel = await dataSource
+      .getRepository(Channel)
+      .save({ name: 'owner', nickname: 'owner', user_id: owner.id });
   });
 
   async function seedVideo(
@@ -117,7 +120,8 @@ describe('VideoProcessor (integration)', () => {
     );
     await videoRepository.save({
       id,
-      user_id: owner.id,
+      channel_id: channel.id,
+      source_key: sourceKey(id),
       slug: generateSlug(),
       title: fixture,
       original_filename: fixture,

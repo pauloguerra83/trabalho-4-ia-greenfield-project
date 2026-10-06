@@ -14,8 +14,9 @@ import { VideoProcessor } from './video.processor';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Video]),
-    // Video → User → Channel relations: with autoLoadEntities, the worker must
+    // Video → Channel → User relations: with autoLoadEntities, the worker must
     // also register those entities or TypeORM fails to build the metadata.
+    // UsersModule registers User and, through ChannelsModule, Channel.
     UsersModule,
     StorageModule,
     MediaModule,

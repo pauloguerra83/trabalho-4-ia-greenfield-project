@@ -180,6 +180,52 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
 
+## Videos
+
+Upload and processing of videos (Phase 03). Full spec: `docs/phases/phase-03-videos/phase-03-videos.md`.
+
+### Modules
+
+| Path | Responsibility |
+|---|---|
+| `src/videos/` | `VideosModule`: entity `Video`, `VideosController` (8 endpoints below), `VideosService` (upload, ownership, presigned URLs). Imports `ChannelsModule`, `StorageModule` and `QueueModule`, and registers the queue on the producer side only |
+| `src/videos/processing/` | `VideoProcessingProducer` (API side) and `VideoProcessingModule` → `VideoProcessor` + `VideoProcessingService` (worker side; imported only by `WorkerModule`) |
+| `src/storage/` | `StorageModule`: two S3 clients (internal `S3_ENDPOINT`, public `S3_PUBLIC_ENDPOINT`), multipart operations, presign, bucket bootstrap |
+| `src/queue/` | `QueueModule`: `BullModule.forRootAsync` over Redis with `QUEUE_PREFIX` |
+| `src/media/` | `MediaService`: `ffprobe` (duration + curated metadata) and `ffmpeg` (JPEG thumbnail) |
+| `src/core/` | `CoreModule`: `ConfigModule` + `TypeOrmModule`, shared by `AppModule` and `WorkerModule` |
+| `src/worker.ts` | Worker entrypoint (`createApplicationContext(WorkerModule)`), run by the `video-worker` container |
+
+### Ownership
+
+A video belongs to a **channel** (`videos.channel_id → channels.id`), and each user owns exactly one channel, created at registration. `POST /videos` resolves the channel through `ChannelsService.findByUserIdOrFail`, and every `/videos/:id…` lookup filters by `{ id, channel: { user_id: <JWT sub> } }`. A video of another user answers 404 `VIDEO_NOT_FOUND`, so the API never reveals whether it exists.
+
+### Endpoints
+
+All of them require `Authorization: Bearer` (401 without it), and `:id` goes through `ParseUUIDPipe` (400 `VALIDATION_ERROR`).
+
+| Method & route | Success | Errors |
+|---|---|---|
+| `POST /videos` | 201 `{ videoId, uploadId, slug, title, status, partSize, partCount }` | 400 `VALIDATION_ERROR`, 404 `CHANNEL_NOT_FOUND`, 413 `VIDEO_TOO_LARGE` |
+| `POST /videos/:id/upload/part-urls` | 200 `{ parts: [{ partNumber, url }], expiresAt }` | 400 `VALIDATION_ERROR` / `INVALID_PART_NUMBER`, 404 `VIDEO_NOT_FOUND`, 409 `INVALID_VIDEO_STATUS` |
+| `GET /videos/:id/upload/parts` | 200 `{ uploadId, partSize, partCount, parts }` | 404 `VIDEO_NOT_FOUND`, 409 `INVALID_VIDEO_STATUS`, 410 `UPLOAD_EXPIRED` |
+| `DELETE /videos/:id/upload` | 204 | 404 `VIDEO_NOT_FOUND`, 409 `INVALID_VIDEO_STATUS` |
+| `POST /videos/:id/upload/complete` | 202 `{ videoId, status: 'processing' }` | 400 `INVALID_UPLOAD_PARTS`, 404 `VIDEO_NOT_FOUND`, 409 `INVALID_VIDEO_STATUS`, 410 `UPLOAD_EXPIRED`, 413 `VIDEO_TOO_LARGE` |
+| `GET /videos/:id` | 200 owner view (`status`, `durationSeconds`, `metadata`, `thumbnailUrl`, `processingError`, …) | 404 `VIDEO_NOT_FOUND` |
+| `GET /videos/:id/stream` | 200 `{ url, expiresAt }` (1 h; storage serves Range/206) | 404 `VIDEO_NOT_FOUND`, 409 `VIDEO_NOT_READY` |
+| `GET /videos/:id/download` | 200 `{ url, expiresAt }` (15 min; `Content-Disposition: attachment`) | 404 `VIDEO_NOT_FOUND`, 409 `VIDEO_NOT_READY` |
+
+### Upload and processing flow
+
+1. `POST /videos` creates the video as `draft` in the user's channel, with a unique `slug`, and opens the S3 multipart upload (64 MiB parts, up to 10 GiB).
+2. The client requests part URLs and `PUT`s each part **straight to the storage**: no video byte goes through the API. It reads the `ETag` of each response.
+3. `POST /videos/:id/upload/complete` assembles the object, checks its size, moves the video to `processing` and enqueues `video.process` (`jobId = videoId`, 3 attempts, exponential backoff).
+4. The `video-worker` runs `ffprobe` + `ffmpeg` on the source, stores `videos/{id}/thumbnail.jpg`, and moves the video to `ready`. Invalid media or exhausted retries move it to `failed` with `processing_error`.
+
+Status cycle: `draft → processing → ready | failed` (`failed` is terminal). It describes processing only; publishing is a separate concern (Phase 04).
+
+Storage keys are stored on the row: `source_key` (`videos/{id}/source`, set at creation) and `thumbnail_key` (`videos/{id}/thumbnail.jpg`, set by the worker).
+
 ## Code Conventions
 
 - **TypeScript:** `nodenext` module resolution, `ES2023` target, `strictNullChecks` on, `noImplicitAny` off

@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
+import { ChannelsService } from '../channels/channels.service';
 import {
   InvalidPartNumberException,
   InvalidUploadPartsException,
@@ -65,11 +66,12 @@ export class VideosService {
     private readonly videoRepository: Repository<Video>,
     private readonly storage: StorageService,
     private readonly producer: VideoProcessingProducer,
+    private readonly channelsService: ChannelsService,
   ) {}
 
   /**
-   * Pre-registers the video as a draft and opens the multipart upload. The
-   * client then uploads the parts straight to the storage.
+   * Pre-registers the video as a draft of the user's channel and opens the
+   * multipart upload. The client then uploads the parts straight to the storage.
    */
   async startUpload(
     userId: string,
@@ -78,6 +80,8 @@ export class VideosService {
     if (dto.fileSize > VIDEO_UPLOAD.MAX_SIZE_BYTES) {
       throw new VideoTooLargeException();
     }
+    // Resolved before the multipart opens, so a failure leaves nothing behind.
+    const channel = await this.channelsService.findByUserIdOrFail(userId);
 
     const id = randomUUID();
     const key = sourceKey(id);
@@ -90,7 +94,8 @@ export class VideosService {
     try {
       video = await this.insertWithUniqueSlug({
         id,
-        user_id: userId,
+        channel_id: channel.id,
+        source_key: key,
         title: dto.title ?? titleFromFileName(dto.fileName),
         original_filename: dto.fileName,
         content_type: dto.contentType,
@@ -182,7 +187,7 @@ export class VideosService {
       partNumbers.map(async (partNumber) => ({
         partNumber,
         url: await this.storage.presignUploadPart(
-          sourceKey(video.id),
+          video.source_key,
           uploadId,
           partNumber,
           expiresIn,
@@ -202,7 +207,7 @@ export class VideosService {
 
     let parts: UploadedPart[];
     try {
-      parts = await this.storage.listParts(sourceKey(video.id), uploadId);
+      parts = await this.storage.listParts(video.source_key, uploadId);
     } catch (error) {
       if (error instanceof StorageUploadNotFoundError) {
         await this.markFailed(video.id, PROCESSING_ERRORS.UPLOAD_EXPIRED);
@@ -229,7 +234,7 @@ export class VideosService {
     const uploadId = this.assertUploading(video);
 
     try {
-      await this.storage.abortMultipartUpload(sourceKey(video.id), uploadId);
+      await this.storage.abortMultipartUpload(video.source_key, uploadId);
     } catch (error) {
       // Already gone (e.g. expired by the storage): aborting is idempotent.
       if (!(error instanceof StorageUploadNotFoundError)) throw error;
@@ -248,7 +253,7 @@ export class VideosService {
   ): Promise<CompleteUploadResponseDto> {
     const video = await this.findOwnedOrFail(userId, videoId);
     const uploadId = this.assertUploading(video);
-    const key = sourceKey(video.id);
+    const key = video.source_key;
 
     try {
       await this.storage.completeMultipartUpload(
@@ -303,9 +308,9 @@ export class VideosService {
     userId: string,
     videoId: string,
   ): Promise<Video> {
-    const video = await this.videoRepository.findOneBy({
-      id: videoId,
-      user_id: userId,
+    // Owned through the channel: Video → Channel → user_id.
+    const video = await this.videoRepository.findOne({
+      where: { id: videoId, channel: { user_id: userId } },
     });
     if (!video) throw new VideoNotFoundException();
     return video;
@@ -326,7 +331,7 @@ export class VideosService {
     contentDisposition?: string,
   ): Promise<VideoUrlResponseDto> {
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
-    const url = await this.storage.presignGet(sourceKey(video.id), expiresIn, {
+    const url = await this.storage.presignGet(video.source_key, expiresIn, {
       contentDisposition,
     });
     return { url, expiresAt };

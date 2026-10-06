@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** completed
-**SIs:** 13/13 completed
+**SIs:** 14/14 completed
 
 ### SI-03.1 — Infra: dependências, configuração e serviços do Compose
 - **Status:** completed
@@ -141,6 +141,37 @@
   - Como o guia mudou, o `SKILL.md` está no `sources_mtime` do `context.md`, e o `/plan-*` desta fase vai acusar desatualização se rodar de novo. Nenhum `/plan-*` precisa rodar de novo na Fase 03.
   - Os `CLAUDE.md` e o guia continuam em inglês, como o restante desses arquivos.
 
+### SI-03.14 — Vídeo pertence ao canal e guarda a chave do original (emenda)
+- **Status:** completed
+- **Tests:**
+  - 111 passing nas suítes afetadas (`src/channels`, `src/videos`, `src/database`);
+  - e2e `test/videos-start-upload.e2e-spec.ts` com 7 cenários, incluindo o novo `usuario-sem-canal-retorna-404`, derivado de `nestjs-project/specs/videos-start-upload.plan.md`;
+  - DoD completa na tabela "Verificação da emenda (SI-03.14)", abaixo.
+- **Observations:**
+  - **Origem:** a revisão do `enunciado-trabalho4.md` achou duas divergências no Data Model gerado pelo `/plan-build`, sem TD de origem:
+    - o vídeo estava ligado ao usuário (`user_id`), quando o enunciado exige "entidade ligada ao canal";
+    - não havia coluna para a chave do arquivo original.
+  - As SIs 03.1 a 03.13 e a migration `CreateVideos` não foram alteradas. As Technical Specifications receberam marcas "emenda SI-03.14".
+  - Migration `1791308343731-LinkVideosToChannels`, gerada pela CLI e completada à mão, com os nomes de FK e índice que a CLI gerou:
+    - o `channel_id` nasce nullable, é preenchido pelo canal do dono e só depois vira `NOT NULL`;
+    - o `source_key` recebe `'videos/' || id || '/source'`;
+    - o `down` devolve o `user_id` a partir de `channels.user_id`.
+  - Verificação da migration no banco de dev:
+    - `migration:run` → `migration:revert` → `migration:run`;
+    - um `migration:generate` depois disso não acha diferença entre a entidade e o schema;
+    - `channel_id` ficou NOT NULL com FK para `channels`, `source_key` NOT NULL, e o `user_id` saiu.
+  - **A migration falha de propósito se algum vídeo tiver dono sem canal**, em vez de inventar um canal. O banco de dev, que é o mesmo dos testes, tinha um resíduo assim: um vídeo do `video.entity.integration-spec.ts`, cujos testes criavam usuários sem canal. O usuário limpou as tabelas antes do `migration:run`. Agora os helpers de teste criam o canal junto.
+  - **Decisão do usuário:** um usuário sem canal recebe 404 `CHANNEL_NOT_FOUND` no `POST /videos`. A nova exceção `ChannelNotFoundException` entrou no Error Catalog, no `@ApiResponse` e no `openapi.json` (só o 404 foi acrescentado). No fluxo normal isso não acontece, porque o registro cria o canal junto com o usuário.
+  - O canal é resolvido pelo `ChannelsService.findByUserIdOrFail` (módulo dono) **antes** de abrir o multipart, então a falha não deixa upload órfão.
+  - A posse passou a ser `findOne({ where: { id, channel: { user_id } } })`, conferido no context7 para o TypeORM 0.3: o join é feito só para o filtro.
+  - O teste unitário usa um `source_key` diferente da chave derivada (`videos/stored-key/source`), para provar que upload, abort, complete, stream e download leem a coluna.
+  - O teste de compensação do `startUpload` (integração) força a falha com `jest.spyOn(videoRepository, 'save')`, porque um usuário inexistente agora falha antes, no canal.
+  - O `createAuthenticatedUser` dos e2e cria o canal pelo `ChannelsService.createChannel`, como o registro faz. A opção `withChannel: false` simula a ausência do canal.
+  - **Documentação:**
+    - seção `## Videos` no `nestjs-project/CLAUDE.md`, com módulos, posse pelo canal, os 8 endpoints, o fluxo de upload e processamento, e as chaves;
+    - uma linha no `CLAUDE.md` da raiz apontando para essa seção.
+  - **Fora do escopo original, em commit próprio:** o `MAIL_FROM` do `.env.example` virou `'"StreamTube" <noreply@streamtube.com>'`, a pendência registrada na SI-03.1. Agora o `docker compose --env-file .env.example config` passa; com a versão anterior ele falha com `unexpected character "<"`.
+
 ## Verificação final (Definition of Done)
 
 | Check | Resultado |
@@ -153,6 +184,17 @@
 - **Lint que já existia:** o `npm run lint` completo falhava com 147 erros em 9 arquivos das Fases 01 e 02 (testes de auth, channels, filtros, mail, users e o `channels.service.ts`), nenhum da Fase 03. Por decisão do usuário, a correção foi feita nesta branch, num commit separado só de lint (`a5a6252`), tipando os mocks e os registros de teste, sem mudar comportamento. O helper `src/test/mailpit.ts` também foi tipado.
 - **`testTimeout: 30000` na config de unitários + integração (`package.json`):** com o ambiente recém-ligado, a primeira suíte (`auth.service.integration-spec.ts`) estourava os 5 s padrão no `beforeAll` (compilação do `ts-jest` + primeira conexão); rodada sozinha, ela passava. Ficou com o mesmo valor do `test/jest-e2e.json`, porque os testes de integração dependem de Postgres, Redis e storage reais.
 - Quatro arquivos que o Prettier tinha reescrito só no fim de linha (`data-source.ts`, as duas migrations antigas e o `seed.ts`) foram restaurados ao `HEAD`.
+
+## Verificação da emenda (SI-03.14)
+
+| Check | Resultado |
+|---|---|
+| `npm test -- --runInBand` | 38/38 suítes, 266/266 testes (~173 s) |
+| `npm run test:e2e -- --runInBand` | 9/9 suítes, 82/82 testes (~121 s); o pipeline continua chegando a `ready` |
+| `npx tsc --noEmit` | exit 0 |
+| `npm run lint` | exit 0 (sem erros; o mesmo aviso `no-unsafe-argument`, configurado como `warn`) |
+| `migration:run` / `migration:revert` / `migration:generate` | aplica, reverte, reaplica; o generate não acha diferença |
+| `docker compose --env-file .env.example config` | exit 0 |
 
 ## Notas para as próximas fases
 

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MediaService } from '../../media/media.service';
-import { sourceKey, thumbnailKey } from '../../storage/storage-keys';
+import { thumbnailKey } from '../../storage/storage-keys';
 import { StorageService } from '../../storage/storage.service';
 import { Video } from '../entities/video.entity';
 import { VideoStatus } from '../video-status.enum';
@@ -36,7 +36,7 @@ export class VideoProcessingService {
     }
 
     const sourceUrl = await this.storage.presignGet(
-      sourceKey(video.id),
+      video.source_key,
       SOURCE_URL_EXPIRES_IN_SECONDS,
       { client: 'internal' },
     );

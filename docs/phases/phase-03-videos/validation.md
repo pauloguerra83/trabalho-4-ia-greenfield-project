@@ -4,8 +4,8 @@ name: phase-03-videos
 status: clean
 issue_count: 0
 sources_mtime:
-  docs/phases/phase-03-videos/context.md: "2026-10-05T19:10:29-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-05T19:08:04-03:00"
+  docs/phases/phase-03-videos/context.md: "2026-10-06T17:50:00-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-06T10:42:01-03:00"
 issues:
   - id: AMB-1
     status: resolved
@@ -18,6 +18,10 @@ issues:
   - id: AMB-3
     status: resolved
     summary: "Destino do registro draft quando o lifecycle aborta o multipart não definido"
+    resolved_by: clarification
+  - id: AMB-4
+    status: resolved
+    summary: "Dono do vídeo no pré-cadastro não definido (usuário ou canal?)"
     resolved_by: clarification
   - id: MD-1
     status: resolved
@@ -68,4 +72,5 @@ _None._ _(UI Inventory adiado: check não aplicável.)_
 - **AMB-1** _(resolved_by clarification)_ — Título do vídeo no pré-cadastro. Escolha do usuário (b): o título é **opcional** no início do upload; quando ausente, o padrão é o **nome do arquivo sem extensão**. A coluna `title` é **NOT NULL**, então todo vídeo tem título desde o pré-cadastro. A edição de título fica para a Fase 04.
 - **AMB-2** _(resolved_by clarification)_ — Superfície de leitura do vídeo na Fase 03. Escolha do usuário (a): a fase expõe **`GET /videos/{id}`** (JWT, só o dono) com status, duração, metadados, `slug` e **URL pré-assinada da thumbnail** (bucket privado, TD-04). O cliente acompanha `processing → ready` por **polling** desse endpoint. A consulta pela URL única (`slug`) e o acesso anônimo ficam para a Fase 05.
 - **AMB-3** _(resolved_by clarification)_ — Registro `draft` com upload abortado pelo lifecycle. Escolha do usuário (a): ao detectar que o `uploadId` não existe mais no storage (na retomada ou na conclusão), o vídeo passa a **`failed`** com motivo **`upload_expired`**. Não há job agendado na Fase 03.
+- **AMB-4** _(resolved_by clarification)_ — Dono do vídeo no pré-cadastro. Escolha do usuário: o vídeo pertence ao **canal** do usuário autenticado (`videos.channel_id` → `channels.id`, cada usuário tem exatamente um canal, criado no cadastro). A posse nos endpoints `/videos/:id…` é verificada por `channel.user_id` = `sub` do JWT; vídeo de outro usuário continua respondendo 404 `VIDEO_NOT_FOUND`. Um usuário sem canal recebe **404 `CHANNEL_NOT_FOUND`** no `POST /videos`, sem criar vídeo nem multipart. Já implementado pela SI-03.14 (emenda do plano), que trocou o `user_id` original da SI-03.3.
 - **ICC-1** _(resolved_by phase-03-videos/TD-09)_ — Acesso direto navegador ↔ storage vs BFF estrito. Escolha do usuário (a): revisão anexada ao TD-09 (mesma letra A) confirmando a exceção consciente. O BFF estrito vale para a API NestJS; o storage é uma origem separada, com CORS restrito à origem do frontend (métodos PUT e GET, expondo o header ETag).

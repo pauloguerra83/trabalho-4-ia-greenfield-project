@@ -73,7 +73,8 @@ describe('videos-start-upload', () => {
       .findOneByOrFail({ id: body.videoId });
     expect(video).toMatchObject({
       status: 'draft',
-      user_id: user.id,
+      channel_id: user.channelId,
+      source_key: `videos/${body.videoId}/source`,
       upload_id: body.uploadId,
       size_bytes: 150000000,
     });
@@ -152,6 +153,26 @@ describe('videos-start-upload', () => {
     expect((missingSize.body as { error: string }).error).toBe(
       'VALIDATION_ERROR',
     );
+  });
+
+  it('usuario-sem-canal-retorna-404', async () => {
+    const withoutChannel = await createAuthenticatedUser(
+      ctx,
+      'semcanal@example.com',
+      { withChannel: false },
+    );
+
+    const res = await startUpload(
+      { fileName: 'aula.mp4', fileSize: 1000, contentType: 'video/mp4' },
+      withoutChannel.accessToken,
+    ).expect(404);
+
+    expect(res.body).toEqual({
+      statusCode: 404,
+      error: 'CHANNEL_NOT_FOUND',
+      message: 'Channel not found',
+    });
+    expect(await videoCount()).toBe(0);
   });
 
   it('sem-token-retorna-401', async () => {

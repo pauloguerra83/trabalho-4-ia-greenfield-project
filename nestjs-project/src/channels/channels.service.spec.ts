@@ -1,4 +1,5 @@
 import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
+import { ChannelNotFoundException } from '../common/exceptions/domain.exception';
 import { ChannelsService } from './channels.service';
 import { Channel } from './entities/channel.entity';
 
@@ -45,6 +46,39 @@ function makeDataSource(manager: MockManager): DataSource {
 }
 
 describe('ChannelsService', () => {
+  describe('findByUserIdOrFail', () => {
+    function makeRepositoryDataSource(found: Channel | null): {
+      dataSource: DataSource;
+      findOneBy: jest.Mock;
+    } {
+      const findOneBy = jest.fn().mockResolvedValue(found);
+      const dataSource = {
+        getRepository: jest.fn().mockReturnValue({ findOneBy }),
+      } as unknown as DataSource;
+      return { dataSource, findOneBy };
+    }
+
+    it("returns the user's channel", async () => {
+      const channel = makeChannel('owner');
+      const { dataSource, findOneBy } = makeRepositoryDataSource(channel);
+      const service = new ChannelsService(dataSource);
+
+      await expect(service.findByUserIdOrFail('user-id')).resolves.toBe(
+        channel,
+      );
+      expect(findOneBy).toHaveBeenCalledWith({ user_id: 'user-id' });
+    });
+
+    it('throws ChannelNotFoundException when the user has no channel', async () => {
+      const { dataSource } = makeRepositoryDataSource(null);
+      const service = new ChannelsService(dataSource);
+
+      await expect(
+        service.findByUserIdOrFail('user-id'),
+      ).rejects.toBeInstanceOf(ChannelNotFoundException);
+    });
+  });
+
   describe('createChannel', () => {
     it('derives nickname from email prefix and saves when no collision', async () => {
       const channel = makeChannel('test');

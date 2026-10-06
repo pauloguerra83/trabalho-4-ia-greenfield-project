@@ -19,14 +19,17 @@ const TEN_GIB = 10737418240;
 describe('Video entity (integration)', () => {
   let dataSource: DataSource;
   let userRepository: Repository<User>;
+  let channelRepository: Repository<Channel>;
   let videoRepository: Repository<Video>;
-  let user: User;
+  let channel: Channel;
 
   beforeAll(async () => {
-    // Exercise the schema created by the CreateVideos migration.
+    // Exercise the schema created by the CreateVideos and
+    // LinkVideosToChannels migrations.
     dataSource = createTestDataSource(ALL_ENTITIES, { synchronize: false });
     await dataSource.initialize();
     userRepository = dataSource.getRepository(User);
+    channelRepository = dataSource.getRepository(Channel);
     videoRepository = dataSource.getRepository(Video);
   });
 
@@ -36,15 +39,24 @@ describe('Video entity (integration)', () => {
 
   beforeEach(async () => {
     await cleanAllTables(dataSource);
-    user = await userRepository.save(
+    const user = await userRepository.save(
       userRepository.create({ email: 'owner@example.com', password: 'hash' }),
+    );
+    channel = await channelRepository.save(
+      channelRepository.create({
+        name: 'owner',
+        nickname: 'owner',
+        user_id: user.id,
+      }),
     );
   });
 
   function buildVideo(overrides: Partial<Video> = {}): Video {
+    const id = overrides.id ?? randomUUID();
     return videoRepository.create({
-      id: randomUUID(),
-      user_id: user.id,
+      id,
+      channel_id: channel.id,
+      source_key: `videos/${id}/source`,
       slug: generateSlug(),
       title: 'Minha aula',
       original_filename: 'aula.mp4',
@@ -93,21 +105,33 @@ describe('Video entity (integration)', () => {
   it('should reject a status outside draft | processing | ready | failed', async () => {
     const error: unknown = await dataSource
       .query(
-        `INSERT INTO "videos" ("id", "user_id", "slug", "title", "original_filename", "content_type", "size_bytes", "status")
-         VALUES ($1, $2, $3, 't', 'f.mp4', 'video/mp4', 1, 'published')`,
-        [randomUUID(), user.id, generateSlug()],
+        `INSERT INTO "videos" ("id", "channel_id", "source_key", "slug", "title", "original_filename", "content_type", "size_bytes", "status")
+         VALUES ($1, $2, 'videos/x/source', $3, 't', 'f.mp4', 'video/mp4', 1, 'published')`,
+        [randomUUID(), channel.id, generateSlug()],
       )
       .catch((e: unknown) => e);
 
     expect(pgErrorCode(error)).toBe('22P02');
   });
 
-  it('should reject a video whose owner does not exist', async () => {
+  it('should reject a video whose channel does not exist', async () => {
     const error: unknown = await videoRepository
-      .save(buildVideo({ user_id: randomUUID() }))
+      .save(buildVideo({ channel_id: randomUUID() }))
       .catch((e: unknown) => e);
 
     expect(pgErrorCode(error)).toBe('23503');
+  });
+
+  it('should reject a video without source_key', async () => {
+    const error: unknown = await dataSource
+      .query(
+        `INSERT INTO "videos" ("id", "channel_id", "slug", "title", "original_filename", "content_type", "size_bytes")
+         VALUES ($1, $2, $3, 't', 'f.mp4', 'video/mp4', 1)`,
+        [randomUUID(), channel.id, generateSlug()],
+      )
+      .catch((e: unknown) => e);
+
+    expect(pgErrorCode(error)).toBe('23502');
   });
 
   it('should read size_bytes back as a number up to 10 GiB', async () => {

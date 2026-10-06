@@ -1,16 +1,17 @@
-import { randomUUID } from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
 import type { ConfigType } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TypeOrmModule, getRepositoryToken } from '@nestjs/typeorm';
 import { BullModule, getQueueToken } from '@nestjs/bullmq';
 import { ListMultipartUploadsCommand, S3Client } from '@aws-sdk/client-s3';
 import { Queue } from 'bullmq';
 import { DataSource, QueryFailedError, Repository } from 'typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
+import { ChannelsService } from '../channels/channels.service';
 import { Channel } from '../channels/entities/channel.entity';
 import {
+  ChannelNotFoundException,
   InvalidUploadPartsException,
   UploadExpiredException,
   VideoNotFoundException,
@@ -44,7 +45,9 @@ describe('VideosService (integration)', () => {
   let videoRepository: Repository<Video>;
   let s3: S3Client;
   let config: ConfigType<typeof storageConfig>;
+  let channelsService: ChannelsService;
   let owner: User;
+  let ownerChannel: Channel;
   let queue: Queue;
 
   beforeAll(async () => {
@@ -62,15 +65,16 @@ describe('VideosService (integration)', () => {
         QueueModule,
         BullModule.registerQueue({ name: VIDEO_PROCESSING_QUEUE }),
       ],
-      providers: [VideosService, VideoProcessingProducer],
+      providers: [VideosService, VideoProcessingProducer, ChannelsService],
     }).compile();
     await module.init(); // bucket bootstrap
 
     queue = module.get(getQueueToken(VIDEO_PROCESSING_QUEUE));
     service = module.get(VideosService);
+    channelsService = module.get(ChannelsService);
     storage = module.get(StorageService);
     dataSource = module.get(DataSource);
-    videoRepository = dataSource.getRepository(Video);
+    videoRepository = module.get(getRepositoryToken(Video));
     s3 = module.get<S3Client>(S3_INTERNAL_CLIENT);
     config = module.get(storageConfig.KEY);
   });
@@ -83,10 +87,20 @@ describe('VideosService (integration)', () => {
     await cleanAllTables(dataSource);
     await emptyBucket(s3, config.bucket);
     await queue.obliterate({ force: true });
-    owner = await dataSource
-      .getRepository(User)
-      .save({ email: 'owner@example.com', password: 'hash' });
+    owner = await createUser('owner@example.com');
+    ownerChannel = await channelsService.createChannel(owner.id, owner.email);
   });
+
+  async function createUser(email: string): Promise<User> {
+    return dataSource.getRepository(User).save({ email, password: 'hash' });
+  }
+
+  /** Another user with a channel of their own. */
+  async function createStranger(): Promise<User> {
+    const stranger = await createUser('stranger@example.com');
+    await channelsService.createChannel(stranger.id, stranger.email);
+    return stranger;
+  }
 
   async function pendingUploadCount(): Promise<number> {
     const page = await s3.send(
@@ -96,7 +110,7 @@ describe('VideosService (integration)', () => {
   }
 
   describe('startUpload', () => {
-    it('should persist a draft owned by the user and open the multipart upload', async () => {
+    it("should persist a draft of the user's channel and open the multipart upload", async () => {
       const result = await service.startUpload(owner.id, {
         fileName: 'aula.mp4',
         fileSize: 150000000,
@@ -107,7 +121,8 @@ describe('VideosService (integration)', () => {
         id: result.videoId,
       });
       expect(video).toMatchObject({
-        user_id: owner.id,
+        channel_id: ownerChannel.id,
+        source_key: `videos/${result.videoId}/source`,
         status: VideoStatus.DRAFT,
         upload_id: result.uploadId,
         slug: result.slug,
@@ -120,16 +135,41 @@ describe('VideosService (integration)', () => {
       ).resolves.toEqual([]);
     });
 
+    it('should report CHANNEL_NOT_FOUND for a user without channel and open no upload', async () => {
+      const userWithoutChannel = await createUser('nochannel@example.com');
+
+      await expect(
+        service.startUpload(userWithoutChannel.id, {
+          fileName: 'aula.mp4',
+          fileSize: 1000,
+          contentType: 'video/mp4',
+        }),
+      ).rejects.toBeInstanceOf(ChannelNotFoundException);
+
+      expect(await videoRepository.count()).toBe(0);
+      expect(await pendingUploadCount()).toBe(0);
+    });
+
     it('should abort the multipart upload when the draft cannot be saved', async () => {
+      const saveError = new QueryFailedError(
+        'INSERT INTO "videos"',
+        [],
+        new Error('connection lost'),
+      );
+      const save = jest
+        .spyOn(videoRepository, 'save')
+        .mockRejectedValueOnce(saveError);
+
       const error: unknown = await service
-        .startUpload(randomUUID(), {
+        .startUpload(owner.id, {
           fileName: 'aula.mp4',
           fileSize: 1000,
           contentType: 'video/mp4',
         })
         .catch((e: unknown) => e);
+      save.mockRestore();
 
-      expect(error).toBeInstanceOf(QueryFailedError);
+      expect(error).toBe(saveError);
       expect(await videoRepository.count()).toBe(0);
       expect(await pendingUploadCount()).toBe(0);
     });
@@ -201,9 +241,7 @@ describe('VideosService (integration)', () => {
 
     it('should hide another user video behind VIDEO_NOT_FOUND', async () => {
       const draft = await startDraft();
-      const stranger = await dataSource
-        .getRepository(User)
-        .save({ email: 'stranger@example.com', password: 'hash' });
+      const stranger = await createStranger();
 
       await expect(
         service.listUploadedParts(stranger.id, draft.videoId),
@@ -306,9 +344,7 @@ describe('VideosService (integration)', () => {
         thumbnailUrl: null,
       });
 
-      const stranger = await dataSource
-        .getRepository(User)
-        .save({ email: 'stranger@example.com', password: 'hash' });
+      const stranger = await createStranger();
       await expect(
         service.getOwnedVideo(stranger.id, draft.videoId),
       ).rejects.toBeInstanceOf(VideoNotFoundException);

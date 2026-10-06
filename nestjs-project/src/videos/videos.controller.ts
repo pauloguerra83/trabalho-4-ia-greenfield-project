@@ -59,6 +59,11 @@ export class VideosController {
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   @ApiResponse({
+    status: 404,
+    description: 'Authenticated user has no channel (CHANNEL_NOT_FOUND)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
     status: 413,
     description: 'Declared file size exceeds 10 GiB (VIDEO_TOO_LARGE)',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },

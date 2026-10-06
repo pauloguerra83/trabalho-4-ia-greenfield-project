@@ -544,24 +544,72 @@ Entregar o fluxo completo de vídeo: serviço de armazenamento compatível com S
 
 ---
 
+### SI-03.14 — Vídeo pertence ao canal e guarda a chave do original (emenda)
+
+> **Emenda posterior à execução das SI-03.1 a 03.13.** Uma revisão do `enunciado-trabalho4.md` achou duas divergências no Data Model gerado pelo `/plan-build`, sem TD de origem. O enunciado diz que "os vídeos da Fase 03 pertencem a um canal" e o critério de aceite pede "entidade ligada ao canal", mas a SI-03.3 ligou o vídeo ao usuário (`user_id`). A persistência pede "as chaves de storage do arquivo e do thumbnail", mas só a thumbnail tinha coluna. As SIs já executadas não foram alteradas; esta SI corrige o schema com uma migration nova e emenda as Technical Specifications (marcadas com "emenda SI-03.14").
+
+**Description:** Liga o vídeo ao canal do usuário (`channel_id → channels.id`) no lugar de `user_id`, e grava a chave do arquivo original em `source_key`. A migration nova faz o backfill dos vídeos existentes. A posse continua sendo do usuário autenticado, agora resolvida pelo canal (`channel.user_id`).
+
+**Technical actions:**
+
+1. Em `src/videos/entities/video.entity.ts`:
+   - `user_id`/`user` saem e entram `@Index() channel_id` e `@ManyToOne(() => Channel)` com `@JoinColumn({ name: 'channel_id' })`;
+   - nova coluna `source_key` (`varchar`, not null);
+   - o `Channel` não ganha lado inverso, pela mesma justificativa da SI-03.3 (um `@OneToMany` obrigaria todo DataSource que carrega `Channel` a carregar `Video`).
+2. Gerar `src/database/migrations/{timestamp}-LinkVideosToChannels.ts` com `npm run migration:generate`, sem editar a `CreateVideos`, e completar à mão o backfill:
+   - `channel_id` é criado nullable, preenchido por `UPDATE … FROM channels WHERE channels.user_id = videos.user_id` e só então passa a `NOT NULL`, com índice e FK;
+   - `source_key` é preenchido com `'videos/' || id || '/source'`, a mesma chave que o código derivava;
+   - por último saem a FK, o índice e a coluna `user_id`;
+   - o `down` é simétrico e devolve `user_id` a partir de `channels.user_id`.
+3. `ChannelsService.findByUserIdOrFail(userId)`, que lança `ChannelNotFoundException` (`CHANNEL_NOT_FOUND`, 404). Assim o canal é resolvido pelo módulo dono, e não pelo `VideosService`. O `VideosModule` importa o `ChannelsModule`.
+4. No `VideosService`:
+   - o `startUpload` resolve o canal **antes** de abrir o multipart e grava `channel_id` e `source_key`;
+   - o `findOwnedOrFail` passa a filtrar por `{ id, channel: { user_id } }`;
+   - as operações de storage (partes, retomada, abort, complete, stream e download) usam `video.source_key`.
+
+   O `VideoProcessingService` também passa a ler `video.source_key`.
+5. `@ApiResponse` 404 `CHANNEL_NOT_FOUND` no `POST /videos` e regeneração do `openapi.json`.
+
+**Tests:**
+
+| Artifact | Layer | Test file |
+|----------|-------|-----------|
+| `ChannelsService.findByUserIdOrFail` | Unit + Integration: canal encontrado; `ChannelNotFoundException` para usuário sem canal | `src/channels/channels.service.spec.ts`, `src/channels/channels.service.integration-spec.ts` |
+| `VideosService` | Unit: grava `channel_id`/`source_key`; `CHANNEL_NOT_FOUND` sem abrir multipart; filtro de posse pelo canal; storage lê a chave da coluna. Integration: rascunho no canal do dono; usuário sem canal; compensação do multipart; não dono com canal próprio | `src/videos/videos.service.spec.ts`, `src/videos/videos.service.integration-spec.ts` |
+| `Video` | Integration: FK de canal inexistente (`23503`); `source_key` nulo (`23502`) | `src/videos/entities/video.entity.integration-spec.ts` |
+| Migrations | Integration: `LinkVideosToChannels` move um vídeo existente para o canal do dono, preenche `source_key` e o `down` devolve o `user_id` | `src/database/migrations.integration-spec.ts` |
+| `POST /videos` | E2E: `channel_id`/`source_key` gravados; usuário sem canal → 404 `CHANNEL_NOT_FOUND` | `test/videos-start-upload.e2e-spec.ts` |
+
+**Dependencies:** SI-03.13 — fase concluída e documentada
+
+**Acceptance criteria:**
+
+1. `npm run migration:run` sobre uma tabela `videos` com dados leva cada vídeo para o canal do seu dono e preenche `source_key = 'videos/{id}/source'`; `npm run migration:revert` devolve `user_id` aos mesmos vídeos.
+2. Depois da migration, a tabela `videos` tem `channel_id` (FK → `channels.id`, not null, indexado) e `source_key` (not null), e não tem mais `user_id`.
+3. `POST /videos` de um usuário sem canal responde 404 `CHANNEL_NOT_FOUND`, sem criar vídeo nem multipart.
+4. Os 8 endpoints de `/videos` mantêm o contrato e as regras de posse (não dono recebe 404 `VIDEO_NOT_FOUND`), e o pipeline completo continua chegando a `ready`.
+
+---
+
 ## Technical Specifications
 
 ### Data Model
 
 #### Video
 
-Tabela `videos`. Criada pela migration `CreateVideos` (SI-03.3).
+Tabela `videos`. Criada pela migration `CreateVideos` (SI-03.3) e emendada pela `LinkVideosToChannels` (SI-03.14), que troca `user_id` por `channel_id` e acrescenta `source_key`.
 
 | Field | Type | Constraints | Notes |
 |-------|------|-------------|-------|
 | id | uuid | PK | Gerado na aplicação (`crypto.randomUUID()`) antes do `CreateMultipartUpload`, porque a chave do objeto usa o `videoId` (phase-03-videos/TD-04) |
-| user_id | uuid | FK → users.id, not null | Dono do vídeo (JWT `sub`) |
+| channel_id | uuid | FK → channels.id, not null | Canal dono do vídeo: o canal do usuário autenticado (JWT `sub` → `channels.user_id`). Substitui o `user_id` da SI-03.3 (emenda SI-03.14) |
 | slug | varchar(11) | unique, not null | Base64url de `crypto.randomBytes(8)`, gerado no pré-cadastro e imutável; nova tentativa em violação de unicidade (phase-03-videos/TD-10) |
 | title | varchar(255) | not null | Opcional no início do upload; quando ausente, recebe o nome do arquivo sem extensão (AMB-1). Edição de título fica para a Fase 04 |
 | original_filename | varchar(255) | not null | Nome do arquivo informado pelo cliente; base do título padrão e do `Content-Disposition` do download |
 | content_type | varchar(127) | not null | Sempre `video/*` (phase-03-videos/TD-05) |
 | size_bytes | bigint | not null | Tamanho declarado no início, substituído pelo `ContentLength` do `HeadObject` na conclusão (phase-03-videos/TD-05). O driver `pg` devolve `bigint` como string: a coluna usa um transformer para `number` (10 GiB cabe em `Number.MAX_SAFE_INTEGER`) |
 | status | enum `videos_status_enum` | not null, default `'draft'`, valores `'draft'`, `'processing'`, `'ready'`, `'failed'` | Ciclo `draft → processing → ready \| failed`, `failed` terminal (phase-03-videos/TD-12) |
+| source_key | varchar | not null | `videos/{videoId}/source`, gravada no pré-cadastro; chave do arquivo original usada por upload, worker, stream e download (phase-03-videos/TD-04; emenda SI-03.14) |
 | upload_id | varchar | nullable | `UploadId` do multipart (phase-03-videos/TD-05); volta a `null` depois de concluir ou abortar |
 | thumbnail_key | varchar | nullable | `videos/{videoId}/thumbnail.jpg`, preenchido pelo worker quando a thumbnail é gravada (phase-03-videos/TD-08) |
 | duration_seconds | double precision | nullable | Duração extraída pelo ffprobe (phase-03-videos/TD-08) |
@@ -570,10 +618,10 @@ Tabela `videos`. Criada pela migration `CreateVideos` (SI-03.3).
 | created_at | timestamp | not null, auto-generated | `@CreateDateColumn` |
 | updated_at | timestamp | not null, auto-generated | `@UpdateDateColumn` |
 
-**Relations:** `Video` → `User` (many-to-one, lado dono via `user_id`). `User` não ganha relação inversa nesta fase.
-**Indexes:** unique em `slug`; índice em `user_id` (FK).
+**Relations:** `Video` → `Channel` (many-to-one, lado dono via `channel_id`); o usuário dono é `channel.user_id`. `Channel` não ganha relação inversa nesta fase (emenda SI-03.14).
+**Indexes:** unique em `slug`; índice em `channel_id` (FK).
 
-**Chaves no storage** (phase-03-videos/TD-04), derivadas do `id` e sem coluna própria, no bucket privado configurado em `S3_BUCKET`:
+**Chaves no storage** (phase-03-videos/TD-04), no bucket privado configurado em `S3_BUCKET`, gravadas nas colunas `source_key` e `thumbnail_key` (emenda SI-03.14):
 
 - `videos/{videoId}/source`: arquivo original enviado por multipart.
 - `videos/{videoId}/thumbnail.jpg`: thumbnail JPEG de 1280px de largura gerada pelo worker.
@@ -623,6 +671,7 @@ Inicia o upload: cria o vídeo como rascunho (`draft`) e abre o multipart no sto
 **Error responses:**
 - 400 VALIDATION_ERROR: corpo fora do schema (campo ausente, `contentType` que não começa com `video/`, `fileSize` não inteiro)
 - 401: sem token válido
+- 404 CHANNEL_NOT_FOUND: o usuário autenticado não tem canal; nada é criado (emenda SI-03.14)
 - 413 VIDEO_TOO_LARGE: `fileSize` acima de 10 GiB
 
 ---
@@ -782,7 +831,7 @@ Devolve uma URL `GetObject` pré-assinada com `ResponseContentDisposition: attac
 
 | Endpoint | Anonymous | Authenticated | Owner | Notes |
 |----------|-----------|---------------|-------|-------|
-| POST /videos | ✗ | ✓ | — | Cria um vídeo do próprio usuário autenticado |
+| POST /videos | ✗ | ✓ | — | Cria um vídeo no canal do próprio usuário autenticado (emenda SI-03.14) |
 | POST /videos/:id/upload/part-urls | ✗ | ✗ | ✓ | Não dono recebe 404 `VIDEO_NOT_FOUND` |
 | GET /videos/:id/upload/parts | ✗ | ✗ | ✓ | Não dono recebe 404 `VIDEO_NOT_FOUND` |
 | DELETE /videos/:id/upload | ✗ | ✗ | ✓ | Não dono recebe 404 `VIDEO_NOT_FOUND` |
@@ -799,6 +848,7 @@ O formato de erro é herdado de phase-02-auth/TD-07: `{ statusCode, error, messa
 
 | errorCode | HTTP | Message | Trigger |
 |-----------|------|---------|---------|
+| CHANNEL_NOT_FOUND | 404 | `Channel not found` | `POST /videos` de um usuário sem canal. No fluxo normal não acontece: o registro cria o canal junto com o usuário (emenda SI-03.14) |
 | VIDEO_NOT_FOUND | 404 | `Video not found` | Qualquer endpoint `/videos/:id…` com id inexistente ou de outro usuário |
 | VIDEO_TOO_LARGE | 413 | `Video exceeds the 10 GiB limit` | `POST /videos` com `fileSize` acima de 10 GiB, ou `POST /videos/:id/upload/complete` quando o `HeadObject` mostra mais de 10 GiB (objeto removido, vídeo `failed` com `file_too_large`) |
 | INVALID_VIDEO_STATUS | 409 | `Operation not allowed for the current video status` | Operações de upload (`part-urls`, `parts`, abort, `complete`) com status diferente de `draft` |
@@ -836,7 +886,7 @@ O formato de erro é herdado de phase-02-auth/TD-07: `{ statusCode, error, messa
 **Processamento** (per `phase-03-videos/TD-08`):
 
 1. Ignora o job, sem erro, se o vídeo não existe mais ou não está em `processing`.
-2. Pré-assina um GET curto de `videos/{videoId}/source` com o cliente **interno** (`S3_ENDPOINT`) e executa `ffprobe -v error -print_format json -show_format -show_streams <url>` via `child_process`; grava `duration_seconds` e o JSON curado em `metadata` (`format`, `video`, `audio`).
+2. Pré-assina um GET curto da `source_key` do vídeo (`videos/{videoId}/source`; emenda SI-03.14) com o cliente **interno** (`S3_ENDPOINT`) e executa `ffprobe -v error -print_format json -show_format -show_streams <url>` via `child_process`; grava `duration_seconds` e o JSON curado em `metadata` (`format`, `video`, `audio`).
 3. Executa `ffmpeg -ss <t> -i <url> -frames:v 1 -vf scale=1280:-2` com `t = min(10% da duração, duração − ε)` (volta para `t = 0` em clipes muito curtos) e grava o JPEG em `videos/{videoId}/thumbnail.jpg` via `PutObject` (`ContentType: 'image/jpeg'`).
 4. Preenche `thumbnail_key` e passa o status para `ready`.
 
@@ -863,6 +913,7 @@ SI-03.1 (root)
 │       └── SI-03.9 — depende de SI-03.8 + SI-03.4 (MediaService e fila)
 │           └── SI-03.12 — depende de SI-03.9 + SI-03.10 + SI-03.11 (pipeline completo)
 │               └── SI-03.13 — depende de SI-03.12 (documentação após validação)
+│                   └── SI-03.14 — depende de SI-03.13 (emenda: vídeo no canal e source_key)
 └── SI-03.4 — depende de SI-03.1 + SI-03.3 (configuração da fila, Redis e VideosModule)
 SI-03.3 (root, independente)
 ```
@@ -884,6 +935,7 @@ SI-03.3 (root, independente)
 - [ ] SI-03.11 — Endpoints GET /videos/:id/stream e GET /videos/:id/download
 - [ ] SI-03.12 — Teste do pipeline completo e contrato OpenAPI
 - [ ] SI-03.13 — Documentação da fase e notas para a Fase 04
+- [ ] SI-03.14 — Vídeo pertence ao canal e guarda a chave do original (emenda)
 
 **Full test suites:**
 

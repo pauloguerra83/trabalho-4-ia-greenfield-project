@@ -1,6 +1,7 @@
 import { DataSource, Repository } from 'typeorm';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
+import { ChannelNotFoundException } from '../common/exceptions/domain.exception';
 import {
   cleanAllTables,
   createTestDataSource,
@@ -42,6 +43,28 @@ describe('ChannelsService (integration)', () => {
       }),
     );
   }
+
+  describe('findByUserIdOrFail', () => {
+    it("returns the user's channel", async () => {
+      const user = await createUser();
+      const created = await channelsService.createChannel(
+        user.id,
+        'owner@example.com',
+      );
+
+      const channel = await channelsService.findByUserIdOrFail(user.id);
+
+      expect(channel.id).toBe(created.id);
+    });
+
+    it('throws ChannelNotFoundException for a user without channel', async () => {
+      const user = await createUser();
+
+      await expect(
+        channelsService.findByUserIdOrFail(user.id),
+      ).rejects.toBeInstanceOf(ChannelNotFoundException);
+    });
+  });
 
   describe('createChannel', () => {
     it('persists a channel derived from email', async () => {

@@ -37,89 +37,90 @@ How each external system is handled in tests. These strategies were confirmed wi
 
 ---
 
-## Object Storage — Local Filesystem
+## Object Storage — MinIO real (Docker)
 
-**Strategy:** Local filesystem storage in development and tests. S3 in production.
+**Strategy:** Real S3-compatible storage (`pgsty/minio`, Compose service `storage`) in development and tests, AWS S3 in production. Tests use a **dedicated bucket** so they never touch development files. Do not replace it with a local-filesystem adapter or an SDK mock: the phase depends on S3 behaviors that only a real server exercises — presigned multipart uploads, `ListParts`/`NoSuchUpload`, `HeadObject`, Range/206 for streaming and FFmpeg reading the source over HTTP.
 
 **Approach:**
-- The storage layer should use an abstraction (e.g., `StorageService` interface) that allows switching between local filesystem and S3
-- In tests, use the local filesystem adapter — no mocking needed
-- Use a temporary directory for test uploads: `os.tmpdir()` or a dedicated `test-uploads/` directory
-- Clean up test files in `afterAll`
+- `src/test/setup-test-env.ts` (first entry of Jest `setupFiles`) forces `S3_BUCKET=streamtube-media-test` and `S3_PUBLIC_ENDPOINT=http://storage:9000` — tests run inside the `nestjs-api` container, so presigned URLs must point at the Compose service name.
+- `StorageBootstrapService` creates the bucket on `module.init()`; call `init()` on the testing module before using `StorageService`.
+- Empty the bucket between tests with `emptyBucket(client, bucket)` from `src/test/storage.ts` (deletes objects and aborts pending multipart uploads).
+- Upload parts with `fetch(presignedUrl, { method: 'PUT', body })` — the real client flow. Use `Uint8Array<ArrayBuffer>` bodies (with TypeScript 5.9 `Buffer` does not satisfy `BodyInit`).
+- Simulate an expired multipart upload by aborting it through `StorageService.abortMultipartUpload` before the call under test.
 
 **Setup pattern:**
 ```typescript
-// In test module setup
-{
-  provide: 'STORAGE_CONFIG',
-  useValue: {
-    driver: 'local',
-    basePath: path.join(os.tmpdir(), 'streamtube-test-uploads'),
-  },
-}
+const module = await Test.createTestingModule({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true, load: [storageConfig] }),
+    StorageModule,
+  ],
+}).compile();
+await module.init(); // bucket bootstrap
+
+const client = module.get<S3Client>(S3_INTERNAL_CLIENT);
+const { bucket } = module.get<ConfigType<typeof storageConfig>>(storageConfig.KEY);
+
+beforeEach(() => emptyBucket(client, bucket));
+afterAll(() => module.close()); // destroys the S3 clients
 ```
 
 **Integration test:**
 ```typescript
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+it('should accept a PUT on a presigned part URL', async () => {
+  const key = sourceKey(randomUUID());
+  const uploadId = await storage.createMultipartUpload(key, 'video/mp4');
+  const url = await storage.presignUploadPart(key, uploadId, 1, 3600);
 
-describe('StorageService (integration)', () => {
-  const testDir = path.join(os.tmpdir(), 'streamtube-test-uploads');
+  const response = await fetch(url, { method: 'PUT', body: new Uint8Array(10) });
 
-  afterAll(() => {
-    fs.rmSync(testDir, { recursive: true, force: true });
-  });
-
-  it('should upload and retrieve a file', async () => {
-    const buffer = Buffer.from('test content');
-    const key = await storageService.upload(buffer, 'test.txt');
-
-    const retrieved = await storageService.get(key);
-    expect(retrieved.toString()).toBe('test content');
-  });
+  expect(response.status).toBe(200);
+  expect(response.headers.get('etag')).toBeTruthy();
 });
 ```
+
+**Server quirks (MinIO):** bucket CORS and the `AbortIncompleteMultipartUpload` lifecycle action are rejected; development configures them at server level (`MINIO_API_CORS_ALLOW_ORIGIN`, `MINIO_API_STALE_UPLOADS_EXPIRY`). `ListParts` answers the last page with `NextPartNumberMarker: '0'`, which makes the SDK `paginateListParts` loop forever — paginate on `IsTruncated`.
 
 ---
 
-## Message Queue — Real (Docker)
+## Message Queue — BullMQ over Redis (Docker)
 
-**Strategy:** Real message broker in Docker. The specific technology is TBD per the architecture diagram (likely BullMQ with Redis or RabbitMQ).
+**Strategy:** Real BullMQ over the Compose `redis` service. Tests use a **dedicated key prefix** (`QUEUE_PREFIX=streamtube-test`, forced by `src/test/setup-test-env.ts`), so the `video-worker` container — prefix `streamtube` — never consumes test jobs and can stay up during the suite. Consumers are exercised by running the **worker inside the test process**, which keeps tests deterministic.
 
-**When the queue technology is chosen, configure:**
-- A queue broker service in `compose.yaml` (e.g., Redis for BullMQ, RabbitMQ for AMQP)
-- Test isolation: use dedicated test queues or clean queues between tests
-- For publisher tests: assert the job is enqueued with correct data
-- For consumer tests: submit a job and assert the processing outcome
+**Approach:**
+- Publisher tests: assert the job by id (`queue.getJob(videoId)`) — name, data and options (`attempts`, `backoff`).
+- Consumer tests: import the consumer module (`VideoProcessingModule`, or `WorkerModule` for the full pipeline) and call `module.init()` — that starts the BullMQ worker; enqueue a job and poll the database until the expected status, with a timeout.
+- Clean the queue between tests with `queue.obliterate({ force: true })`.
+- `module.close()` closes queues and workers; skipping it leaves Jest hanging on open Redis handles.
+- In BullMQ 5.x `queue.client` is an abstract `IRedisClient` (no `keys`); inspect a job hash with `hgetall('{prefix}:{queue}:{jobId}')`.
 
-**Setup pattern (BullMQ example):**
+**Setup pattern:**
 ```typescript
-// In test module
-BullModule.forRoot({
-  connection: {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: Number(process.env.REDIS_PORT ?? 6379),
-  },
-}),
-BullModule.registerQueue({ name: 'video-processing' }),
+const module = await Test.createTestingModule({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true, load: [storageConfig, queueConfig] }),
+    TypeOrmModule.forRoot(createTestDataSource(ALL_ENTITIES, { synchronize: false }).options),
+    VideoProcessingModule, // consumer: the worker starts on init()
+    BullModule.registerQueue({ name: VIDEO_PROCESSING_QUEUE }), // producer side
+  ],
+  providers: [VideoProcessingProducer],
+}).compile();
+await module.init();
 ```
 
 ```typescript
-describe('VideoService (integration - queue)', () => {
-  it('should enqueue a processing job on upload', async () => {
-    await videoService.upload(videoData);
+it('should take a valid video to ready', async () => {
+  await producer.enqueue(videoId);
 
-    const queue = module.get<Queue>(getQueueToken('video-processing'));
-    const jobs = await queue.getJobs(['waiting']);
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0].data).toEqual(
-      expect.objectContaining({ videoId: expect.any(String) }),
-    );
-  });
+  const video = await waitFor(
+    () => videoRepository.findOneByOrFail({ id: videoId }),
+    (v) => v.status === VideoStatus.READY,
+  );
+  expect(video.thumbnail_key).toBe(thumbnailKey(videoId));
 });
 ```
+
+**Retry semantics:** the worker `failed` event fires on **every** failed attempt. Assert the terminal state for the last attempt (`attemptsMade >= opts.attempts`) and for `UnrecoverableError` (fails without retries); unit-test the handler with fake jobs instead of waiting for real backoff.
 
 ---
 

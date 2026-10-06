@@ -10,20 +10,20 @@ More info in the project overview: [docs/project-plan.md](docs/project-plan.md)
 
 This is a monorepo with two main areas:
 
-- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc.
+- `nestjs-project/` — Backend API (NestJS 11, TypeScript, Express). Contains modules for users, channels, videos, comments, etc. The videos module (ownership by channel, the 8 endpoints, upload and processing flow) is described in the "Videos" section of `nestjs-project/CLAUDE.md`.
 - `docs/` — Project documentation, architecture diagrams, and planning.
-- `next-frontend/` (Next.js) — not yet initialized
+- `next-frontend/` — Frontend (Next.js 16) with Phases 01–02 (base config and auth); see `next-frontend/CLAUDE.md`. The video UI is out of scope for Phase 03.
 
 ## Architecture (C4 Container Diagram)
 
 See `docs/diagrams/software-arch.mermaid` for the full diagram. Key containers:
 
-- **Frontend** (Next.js) → calls API via REST, streams from Object Storage
-- **API** (Nest.js) → business rules, auth, reads/writes DB, uploads to storage, publishes jobs to queue, sends emails
+- **Frontend** (Next.js) → calls API via REST; uploads video parts to and streams from Object Storage through presigned URLs
+- **API** (Nest.js) → business rules, auth, reads/writes DB, presigns direct-to-storage multipart uploads (no video bytes go through it), publishes jobs to queue, sends emails
 - **Video Worker** (FFmpeg) → consumes jobs from queue, processes videos, updates DB and storage
 - **Database** (PostgreSQL) → users, channels, videos, comments, likes
-- **Object Storage** (S3/MinIO) → video files and thumbnails
-- **Message Queue** (TBD) → video processing job queue
+- **Object Storage** (S3-compatible; `pgsty/minio` in development) → video files and thumbnails, one private bucket with keys `videos/{videoId}/source` and `videos/{videoId}/thumbnail.jpg`
+- **Message Queue** (BullMQ over Redis) → `video-processing` queue with `video.process` jobs
 - **Email Service** (SMTP) → account confirmation and password recovery
 
 ## Docker Networking
@@ -36,6 +36,15 @@ Inside a container, `localhost` refers to the container itself, not the host mac
 - **Wrong:** `DB_HOST=localhost`
 
 This applies to all environment variables, configuration files, and code that references service hosts.
+
+### The only authorized exception: `S3_PUBLIC_ENDPOINT`
+
+Presigned storage URLs embed the host they were signed for, and they are used **by the browser**, which cannot resolve Compose service names. So the backend signs URLs with two S3 clients:
+
+- `S3_ENDPOINT=http://storage:9000` — every server-side call (API and video worker), following the rule above.
+- `S3_PUBLIC_ENDPOINT=http://localhost:9000` — **only** to sign URLs handed to HTTP clients (part uploads, streaming, download, thumbnails). In production it points at the real S3/CDN host.
+
+This is the only `localhost` value allowed in the configuration. It also makes the storage a separate origin for the browser, a deliberate exception to the strict BFF used for the NestJS API: CORS on the storage is restricted to the frontend origin (`STORAGE_CORS_ORIGIN`, methods `PUT`/`GET`, exposing `ETag`). Tests override it with `http://storage:9000` because they run inside the `nestjs-api` container.
 
 ## Working Principles
 
